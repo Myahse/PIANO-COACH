@@ -1,14 +1,6 @@
-/** Encode an AudioBuffer as a 16-bit mono WAV File for re-transcription. */
-export function audioBufferToWavFile(buffer: AudioBuffer, filename: string): File {
-  const sampleRate = buffer.sampleRate;
-  const length = buffer.length;
-  const channels = buffer.numberOfChannels;
-  const mono = new Float32Array(length);
-  for (let c = 0; c < channels; c++) {
-    const data = buffer.getChannelData(c);
-    for (let i = 0; i < length; i++) mono[i]! += data[i]! / channels;
-  }
-
+/** Encode mono float samples as a 16-bit WAV File. */
+export function monoSamplesToWavFile(samples: Float32Array, sampleRate: number, filename: string): File {
+  const length = samples.length;
   const bytesPerSample = 2;
   const blockAlign = bytesPerSample;
   const byteRate = sampleRate * blockAlign;
@@ -37,10 +29,22 @@ export function audioBufferToWavFile(buffer: AudioBuffer, filename: string): Fil
 
   let offset = header;
   for (let i = 0; i < length; i++) {
-    const sample = Math.max(-1, Math.min(1, mono[i] ?? 0));
+    const sample = Math.max(-1, Math.min(1, samples[i] ?? 0));
     view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
     offset += 2;
   }
 
   return new File([out], filename.replace(/\.[^.]+$/, "") + ".wav", { type: "audio/wav" });
+}
+
+/** Encode an AudioBuffer as a 16-bit mono WAV File for re-transcription. */
+export function audioBufferToWavFile(buffer: AudioBuffer, filename: string): File {
+  const length = buffer.length;
+  const channels = buffer.numberOfChannels;
+  const mono = new Float32Array(length);
+  for (let c = 0; c < channels; c++) {
+    const data = buffer.getChannelData(c);
+    for (let i = 0; i < length; i++) mono[i]! += data[i]! / channels;
+  }
+  return monoSamplesToWavFile(mono, buffer.sampleRate, filename);
 }

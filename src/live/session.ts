@@ -63,7 +63,16 @@ export class LiveSession {
   private waitFrozenAt = 0;
   private waitStartedAt = 0;
   private context: AudioContext | null = null;
+  private practiceSpeed = 1;
   private onGuide: ((note: number, on: boolean, velocity?: number) => void) | null = null;
+
+  setPracticeSpeed(speed: number): void {
+    this.practiceSpeed = Math.min(1, Math.max(0.5, speed));
+  }
+
+  practiceSpeedNow(): number {
+    return this.practiceSpeed;
+  }
 
   setGuide(handler: (note: number, on: boolean, velocity?: number) => void): void {
     this.onGuide = handler;
@@ -344,6 +353,7 @@ export class LiveSession {
     this.backingGain = gain;
     this.updateBackingGain();
     source.buffer = this.audioBuffer;
+    source.playbackRate.value = this.practiceSpeed;
     source.connect(gain);
     gain.connect(this.context.destination);
     source.start(when, offset);

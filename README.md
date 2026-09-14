@@ -1,6 +1,6 @@
 # Piano Coach
 
-Learn piano with falling notes, guided courses, and automatic transcription from MP3, MIDI, or MusicXML. Works in the browser and as a desktop app (Windows) via [Tauri](https://tauri.app/).
+Learn piano with falling notes, guided courses, and automatic transcription from MP3, MIDI, or MusicXML. Built with **TypeScript + Vite** (no React). Works in the browser and as a desktop app (Windows-first) via [Tauri](https://tauri.app/).
 
 Connect a MIDI keyboard (USB or Bluetooth), import songs, and practice with Easy / Medium / Hard arrangements, sheet music, and a built-in note editor.
 
@@ -54,10 +54,56 @@ MuScriptor models are downloaded from Hugging Face (~5 GB for the large model). 
 
 A lighter in-browser fallback uses [Spotify Basic Pitch](https://github.com/spotify/basic-pitch) when Python backends are unavailable.
 
+## Architecture
+
+Import and transcription follow a fixed pipeline (`src/pipeline/`):
+
+```
+MP3 / audio
+     │
+     ▼
+ Audio preprocessing     ← solo piano vs full song (src/pipeline/preprocess.ts)
+     │
+     ├── solo piano ─────────────┐
+     │                           │
+     └── full song               │
+           │                     │
+           ▼                     │
+     Piano stem separation       │  (placeholder — src/pipeline/separation.ts)
+           │                     │
+           └──────────┬──────────┘
+                      ▼
+              MuScriptor Large     (src/pipeline/transcribeStage.ts)
+                      │
+                      ▼
+                 Raw MIDI
+                      │
+                      ▼
+            ┌──────────────────┐
+            │ MIDI Intelligence│  (src/pipeline/intelligence.ts)
+            │                  │
+            │ • note cleanup   │  ← cleanup.ts, timed.ts
+            │ • timing         │
+            │ • hand splitting │  ← handSplit.ts
+            │ • quantization   │  (optional)
+            └────────┬─────────┘
+                     ▼
+               Piano Coach
+                     │
+         ┌───────────┼───────────┐
+         ▼           ▼           ▼
+    Falling notes  Sheet music  Practice
+```
+
+Entry point: `runImportPipeline()` in `src/pipeline/run.ts`, called from `transcribeAudioFile()`.
+
+**Planned next:** real stem separation backend, pedal reconstruction, notation interpretation layer, automated pipeline tests.
+
 ## Project structure
 
 ```
 src/           TypeScript app (UI, lessons, live play, notation)
+src/pipeline/  Import pipeline (preprocess → transcribe → intelligence)
 src-tauri/     Rust / Tauri desktop shell
 scripts/       Python transcription helpers and setup scripts
 public/        Static assets

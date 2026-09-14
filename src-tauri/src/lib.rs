@@ -16,6 +16,14 @@ fn muscriptor_script_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("scripts/transcribe-muscriptor.py"))
 }
 
+fn separate_stems_script_path() -> PathBuf {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest
+        .parent()
+        .map(|root| root.join("scripts").join("separate-stems.py"))
+        .unwrap_or_else(|| PathBuf::from("scripts/separate-stems.py"))
+}
+
 fn muscriptor_model() -> String {
     std::env::var("PIANO_COACH_MUSCRIPTOR_MODEL").unwrap_or_else(|_| "large".into())
 }
@@ -127,6 +135,71 @@ fn muscriptor_available() -> bool {
 }
 
 #[tauri::command]
+fn demucs_available() -> bool {
+    if !python_path().exists() || !separate_stems_script_path().exists() {
+        return false;
+    }
+    Command::new(python_path())
+        .args(["-c", "import demucs"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn separate_stems(audio: Vec<u8>, filename: String) -> Result<Vec<u8>, String> {
+    if !demucs_available() {
+        return Err("Demucs is not installed. pip install demucs in the MuScriptor Python environment.".into());
+    }
+
+    let tmp = std::env::temp_dir().join("piano-coach-stems");
+    fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+
+    let safe_name = Path::new(&filename)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("upload.mp3");
+    let id = format!(
+        "{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+    let in_path = tmp.join(format!("in-{id}-{safe_name}"));
+    fs::write(&in_path, &audio).map_err(|e| e.to_string())?;
+
+    let output = Command::new(python_path())
+        .arg(separate_stems_script_path())
+        .arg(&in_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let _ = fs::remove_file(&in_path);
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() { stdout } else { stderr });
+    }
+
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("Invalid stem JSON: {e}"))?;
+    if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
+        return Err(err.into());
+    }
+    let inst_path = json
+        .get("instruments")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Stem JSON missing instruments path".to_string())?;
+
+    fs::read(inst_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn transcribe_muscriptor(audio: Vec<u8>, filename: String, target: String) -> Result<serde_json::Value, String> {
     if !muscriptor_available() {
         return Err("MuScriptor is not installed. Run scripts/setup-muscriptor.ps1".into());
@@ -182,7 +255,12 @@ fn transcribe_muscriptor(audio: Vec<u8>, filename: String, target: String) -> Re
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![muscriptor_available, transcribe_muscriptor])
+        .invoke_handler(tauri::generate_handler![
+            muscriptor_available,
+            transcribe_muscriptor,
+            demucs_available,
+            separate_stems
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Piano Coach");
 }

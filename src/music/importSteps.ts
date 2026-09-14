@@ -52,10 +52,15 @@ export function resolveImportProgress(pct: number, label?: string): ImportProgre
     step = "detecting";
   } else if (
     text.includes("prepar") ||
+    text.includes("analyz") ||
     text.includes("loading") ||
     text.includes("audio") ||
     text.includes("resample") ||
     text.includes("isolat") ||
+    text.includes("separat") ||
+    text.includes("stem") ||
+    text.includes("cleaning midi") ||
+    text.includes("assigning hands") ||
     (pct >= 5 && pct < 24)
   ) {
     step = "processing";

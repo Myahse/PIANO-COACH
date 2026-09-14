@@ -1,9 +1,7 @@
-import { prepareMelodyNotes, preparePianoNotes } from "./cleanup";
-import { splitHands } from "./handSplit";
+import { runImportPipeline } from "../pipeline";
 import {
   MUSCRIPTOR_LABEL,
   normalizeTranscribeTarget,
-  transcribeWithMuScriptor,
   type TranscribeTarget,
 } from "./muscriptor";
 import { type TimedNote } from "./timed";
@@ -50,16 +48,53 @@ export function applyTileMode(source: TimedNote[] | NoteLayers, mode: TileMode):
   return all.slice().sort((a, b) => a.start - b.start || a.note - b.note);
 }
 
+export type TranscribeOptions = {
+  signal?: AbortSignal;
+  engine?: "auto" | "muscriptor" | "basic-pitch";
+};
+
 export async function transcribeAudioFile(
   file: File,
-  _buffer: AudioBuffer,
+  buffer: AudioBuffer,
   onProgress?: (pct: number, label?: string) => void,
   mode: TileMode = "both",
   target: TranscribeTarget = "both",
+  opts: TranscribeOptions = {},
 ): Promise<Transcription> {
   const normalizedTarget = normalizeTranscribeTarget(target);
-  const layers = await transcribeWithMuScriptor(file, normalizedTarget, onProgress);
-  return packLayers(layers.voiceNotes, layers.instNotes, mode, layers.engine, onProgress);
+  const result = await runImportPipeline(
+    file,
+    buffer,
+    {
+      target: normalizedTarget,
+      enableSeparation: true,
+      signal: opts.signal,
+      engine: opts.engine,
+    },
+    onProgress,
+  );
+
+  const chosen = applyTileMode(
+    {
+      voice: result.voiceNotes,
+      instruments: result.instNotes,
+      leftHand: result.leftHandNotes,
+      rightHand: result.rightHandNotes,
+      all: result.fullNotes,
+    },
+    mode,
+  );
+
+  return {
+    notes: chosen,
+    fullNotes: result.fullNotes.length ? result.fullNotes : result.instNotes.length ? result.instNotes : result.voiceNotes,
+    voiceNotes: result.voiceNotes,
+    instNotes: result.instNotes,
+    leftHandNotes: result.leftHandNotes,
+    rightHandNotes: result.rightHandNotes,
+    offset: 0,
+    engine: result.engine,
+  };
 }
 
 /** @deprecated Use transcribeAudioFile — kept for bench tooling. */
@@ -72,30 +107,4 @@ export async function transcribeAudio(
   const blob = new Blob([buffer.getChannelData(0)], { type: "audio/wav" });
   const file = new File([blob], "bench.wav", { type: "audio/wav" });
   return transcribeAudioFile(file, buffer, onProgress, mode, target);
-}
-
-function packLayers(
-  voiceNotes: TimedNote[],
-  instNotes: TimedNote[],
-  mode: TileMode,
-  engine: string,
-  onProgress?: (pct: number, label?: string) => void,
-): Transcription {
-  onProgress?.(92, "Creating Score · saving transcription…");
-  const inst = preparePianoNotes([...instNotes].sort((a, b) => a.start - b.start || a.note - b.note));
-  const voice = prepareMelodyNotes([...voiceNotes].sort((a, b) => a.start - b.start || a.note - b.note));
-  const { left, right } = splitHands(inst);
-  const all = [...inst, ...voice].sort((a, b) => a.start - b.start || a.note - b.note);
-  const chosen = applyTileMode({ voice, instruments: inst, leftHand: left, rightHand: right, all }, mode);
-  onProgress?.(100, "Done");
-  return {
-    notes: chosen,
-    fullNotes: all.length ? all : inst.length ? inst : voice,
-    voiceNotes: voice,
-    instNotes: inst,
-    leftHandNotes: left,
-    rightHandNotes: right,
-    offset: 0,
-    engine,
-  };
 }

@@ -28,7 +28,9 @@ import {
 import { parseMidi, writeMidi } from "../music/midiFile";
 import { isMusicXmlFile, loadMusicXmlText, parseMusicXml } from "../music/musicXmlFile";
 import { prettyChord, prettyName } from "../music/notes";
-import { pieceDuration, type Piece, type TimedNote } from "../music/timed";
+import { formatPracticeSpeed, loadPracticeSpeed, PRACTICE_SPEEDS, savePracticeSpeed } from "../live/practiceSpeed";
+import { pieceDuration, scaleTimedNotes, type Piece, type TimedNote } from "../music/timed";
+import { checkModelSetup, friendlyTranscriptionError } from "../transcription";
 import { fixSemitoneSlips, limitExtremeFlood, polishHardChords } from "../music/cleanup";
 import { refineNoteDurations } from "../music/duration";
 import { applySongLevel, normalizeSongLevel, sourceNotesForLevel, type SongLevel } from "../music/difficulty";
@@ -287,6 +289,15 @@ export function mountApp(host: HTMLElement): void {
             <label class="toggle"><input type="checkbox" data-hear-notes /> Guide</label>
             <label class="toggle"><input type="checkbox" data-wait-for-me /> Wait for me</label>
             <label class="toggle"><input type="checkbox" data-show-sheet checked /> Sheet</label>
+            <label>Practice tempo
+              <select data-practice-speed></select>
+            </label>
+          </div>
+          <div class="model-setup-panel" data-model-setup>
+            <h4>AI transcription setup</h4>
+            <ul class="model-setup-steps" data-model-setup-steps></ul>
+            <p class="hint" data-model-setup-hint></p>
+            <button type="button" class="ghost" data-model-setup-refresh>Check setup</button>
           </div>
         </div>
         <div class="ss-view-tabs hidden" data-view-tabs>
@@ -350,6 +361,7 @@ export function mountApp(host: HTMLElement): void {
           <ol class="import-steps" data-import-steps></ol>
           <div class="import-progress import-overlay-bar"><i data-import-overlay-bar></i></div>
           <p class="import-step-detail" data-import-step-detail></p>
+          <button type="button" class="ghost import-cancel" data-import-cancel>Cancel</button>
           <button type="button" class="ghost import-dismiss hidden" data-import-dismiss>Dismiss</button>
         </div>
       </div>
@@ -465,9 +477,15 @@ export function mountApp(host: HTMLElement): void {
   const importStepDetail = $("[data-import-step-detail]");
   const importOverlayBar = $<HTMLElement>("[data-import-overlay-bar]");
   const importDismiss = $<HTMLButtonElement>("[data-import-dismiss]");
+  const importCancel = $<HTMLButtonElement>("[data-import-cancel]");
+  const modelSetupSteps = $<HTMLElement>("[data-model-setup-steps]");
+  const modelSetupHint = $("[data-model-setup-hint]");
+  const modelSetupRefresh = $<HTMLButtonElement>("[data-model-setup-refresh]");
+  const practiceSpeedSelect = $<HTMLSelectElement>("[data-practice-speed]");
   let importOverlayTimer = 0;
   let importPulseTimer = 0;
   let importStartedAt = 0;
+  let importAbort: AbortController | null = null;
 
   const formatImportElapsed = (ms: number): string => {
     const sec = Math.floor(ms / 1000);
@@ -805,6 +823,9 @@ export function mountApp(host: HTMLElement): void {
     } else {
       notes = refineNoteDurations(limitExtremeFlood(fixSemitoneSlips(notes)));
     }
+    const speed = loadPracticeSpeed();
+    live.setPracticeSpeed(speed);
+    if (speed !== 1) notes = scaleTimedNotes(notes, speed);
     return notes;
   };
 
@@ -1752,6 +1773,7 @@ export function mountApp(host: HTMLElement): void {
       const mode = normalizeTileMode(tileModeSelect.value);
       const target = normalizeTranscribeTarget(transcribeTargetSelect.value) as TranscribeTarget;
       await probeMuScriptor();
+      importAbort = new AbortController();
       startImportPulse();
       let result;
       try {
@@ -1766,9 +1788,11 @@ export function mountApp(host: HTMLElement): void {
           },
           mode,
           target,
+          { signal: importAbort.signal },
         );
       } finally {
         stopImportPulse();
+        importAbort = null;
       }
 
       const updated: Piece = {
@@ -1797,7 +1821,7 @@ export function mountApp(host: HTMLElement): void {
       setImportMessage(`Re-transcribed ${result.fullNotes.length} notes (${engineLabel}).`);
       finishImportOverlay(true, `${updated.title} re-transcribed`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Re-transcribe failed.";
+      const message = friendlyTranscriptionError(error);
       setImportMessage(message);
       finishImportOverlay(false, message);
     } finally {
@@ -1833,11 +1857,52 @@ export function mountApp(host: HTMLElement): void {
     importStepDetail.textContent = detail ?? IMPORT_STEPS.find((item) => item.id === step)?.label ?? "";
   };
 
+  const renderModelSetup = async (): Promise<void> => {
+    const state = await checkModelSetup();
+    modelSetupSteps.innerHTML = state.steps
+      .map(
+        (step) =>
+          `<li class="${step.done ? "done" : "pending"}"><strong>${step.done ? "✓" : "○"}</strong> ${step.label}${
+            step.action && !step.done ? `<em>${step.action}</em>` : ""
+          }</li>`,
+      )
+      .join("");
+    modelSetupHint.textContent = state.muscriptorAvailable
+      ? `MuScriptor ready${state.device === "cuda" ? " (GPU)" : state.device === "cpu" ? " (CPU)" : ""}.`
+      : state.isDesktop
+        ? "Complete the steps above for Songscription-quality transcription."
+        : "Browser mode uses Basic Pitch. Install the desktop app for MuScriptor.";
+  };
+
+  practiceSpeedSelect.innerHTML = PRACTICE_SPEEDS.map(
+    (speed) => `<option value="${speed}">${formatPracticeSpeed(speed)}</option>`,
+  ).join("");
+  practiceSpeedSelect.value = String(loadPracticeSpeed());
+  practiceSpeedSelect.addEventListener("change", () => {
+    const speed = Number(practiceSpeedSelect.value);
+    if ((PRACTICE_SPEEDS as readonly number[]).includes(speed)) {
+      savePracticeSpeed(speed as (typeof PRACTICE_SPEEDS)[number]);
+      live.setPracticeSpeed(speed);
+      if (mode === "live") loadSelectedPiece();
+    }
+  });
+
+  modelSetupRefresh.addEventListener("click", () => {
+    void renderModelSetup();
+  });
+
+  importCancel.addEventListener("click", () => {
+    importAbort?.abort();
+    stopImportPulse();
+    finishImportOverlay(false, "Transcription cancelled.");
+  });
+
   const showImportOverlay = (fileName: string, on: boolean): void => {
     importOverlayOpen = on;
     importOverlay.classList.toggle("hidden", !on);
     importOverlay.classList.remove("import-overlay-error");
     importDismiss.classList.add("hidden");
+    importCancel.classList.toggle("hidden", !on);
     if (on) {
       importFileName.textContent = fileName;
       importStepsList.querySelectorAll(".import-step").forEach((el) => {
@@ -1979,6 +2044,7 @@ export function mountApp(host: HTMLElement): void {
         const mode = normalizeTileMode(tileModeSelect.value);
         const target = normalizeTranscribeTarget(transcribeTargetSelect.value) as TranscribeTarget;
         await probeMuScriptor();
+        importAbort = new AbortController();
         startImportPulse();
         let result;
         try {
@@ -1993,9 +2059,11 @@ export function mountApp(host: HTMLElement): void {
             },
             mode,
             target,
+            { signal: importAbort.signal },
           );
         } finally {
           stopImportPulse();
+          importAbort = null;
         }
         piece = {
           id: `import-${Date.now()}`,
@@ -2042,7 +2110,7 @@ export function mountApp(host: HTMLElement): void {
         closeImportOverlay(900);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not read that file.";
+      const message = friendlyTranscriptionError(error);
       setImportMessage(message);
       if (isAudio) finishImportOverlay(false, message);
       else setImportProgress(0, false);
@@ -2068,6 +2136,7 @@ export function mountApp(host: HTMLElement): void {
   settingsToggle.addEventListener("click", () => {
     settingsPanel.classList.toggle("hidden");
     settingsToggle.classList.toggle("active", !settingsPanel.hidden);
+    if (!settingsPanel.hidden) void renderModelSetup();
   });
 
   sidebarRecents.addEventListener("click", (event) => {
@@ -2264,6 +2333,7 @@ export function mountApp(host: HTMLElement): void {
   setMode(isDesktopApp ? "live" : "learn");
   window.setTimeout(() => piano.centerOnMiddleC(), 80);
   void refreshConverterHint();
+  void renderModelSetup();
   void wipeOldLibraryOnce()
     .then(() => listLibraryPieces())
     .then((pieces) => {

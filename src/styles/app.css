@@ -285,6 +285,38 @@ button {
   flex: 1 1 140px;
 }
 
+.model-setup-panel {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.model-setup-panel h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.model-setup-steps {
+  margin: 0 0 8px;
+  padding-left: 1.1rem;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.model-setup-steps li.pending em {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 12px;
+}
+
+.model-setup-steps li.done {
+  color: #9fd4a8;
+}
+
 .ss-workspace {
   flex: 1;
   min-height: 0;
@@ -1180,6 +1212,14 @@ select {
 .score { min-width: 640px; height: 230px; }
 .score .brace { stroke: #2a241c; stroke-width: 3; }
 .score .bar { stroke: #2a241c; stroke-width: 1.2; }
+.score .beat-grid { stroke: rgba(42, 36, 28, 0.22); stroke-width: 1; stroke-dasharray: 2 4; }
+.score-key, .score-sig, .score-tempo {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: inherit;
+}
+.score-sig { letter-spacing: 0.08em; }
+.score-tempo { font-size: 10px; }
 .score-event[data-state="now"] .head { fill: #c4893a; }
 .score-event[data-state="now"] .stem { stroke: #c4893a; }
 .score-event[data-state="done"] .head { fill: #5d8f4d; }
@@ -1417,6 +1457,11 @@ select {
 
 .import-dismiss {
   margin-top: 14px;
+  width: 100%;
+}
+
+.import-cancel {
+  margin-top: 10px;
   width: 100%;
 }
 

@@ -1,5 +1,6 @@
 import { isBlackKey } from "../music/notes";
 import type { TimedNote } from "../music/timed";
+import { accidentalForKey, beatGridMarkup, interpretForNotation, notationHeaderMarkup } from "./interpret";
 
 type ScoreEvent = {
   start: number;
@@ -16,27 +17,6 @@ function diatonicFromC0(midi: number): number {
 function staffY(midi: number, bass: boolean, gap: number, originY: number): number {
   const ref = bass ? 43 : 64;
   return originY - (diatonicFromC0(midi) - diatonicFromC0(ref)) * (gap / 2);
-}
-
-function groupEvents(notes: TimedNote[]): ScoreEvent[] {
-  const sorted = [...notes].sort((a, b) => a.start - b.start || a.note - b.note);
-  const events: ScoreEvent[] = [];
-  for (const note of sorted) {
-    const last = events.at(-1);
-    if (last && Math.abs(note.start - last.start) < 0.045) {
-      if (!last.midi.includes(note.note)) last.midi.push(note.note);
-      last.duration = Math.max(last.duration, note.duration);
-      continue;
-    }
-    events.push({ start: note.start, duration: note.duration, midi: [note.note] });
-  }
-  return events.slice(0, 2000);
-}
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0.5;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? 0.5;
 }
 
 export class ScoreView {
@@ -81,9 +61,15 @@ export class ScoreView {
   }
 
   render(notes: TimedNote[]): void {
-    this.events = groupEvents(notes);
+    const interpreted = interpretForNotation(notes);
+    this.events = interpreted.events.map((event) => ({
+      start: event.start,
+      duration: event.duration,
+      midi: event.midi,
+    }));
     this.currentIndex = -1;
-    const beat = median(this.events.map((event) => event.duration));
+    const beat = interpreted.beatDuration;
+    const scoreKey = interpreted.key;
     const gap = 13;
     const left = 72;
     const trebleY = 72;
@@ -113,7 +99,8 @@ export class ScoreView {
             const y = staffY(midi, bass, gap, origin);
             const stemUp = y > origin - gap * 2;
             const ledger = ledgerLines(midi, bass, cx, gap, origin);
-            const acc = isBlackKey(midi) ? `<text class="acc" x="${cx - 16}" y="${y + 4}">♯</text>` : "";
+            const accSymbol = isBlackKey(midi) ? accidentalForKey(midi, scoreKey) : null;
+            const acc = accSymbol ? `<text class="acc" x="${cx - 16}" y="${y + 4}">${accSymbol}</text>` : "";
             const stem = stemUp
               ? `<line class="stem" x1="${cx + 7}" y1="${y}" x2="${cx + 7}" y2="${y - 32}" />`
               : `<line class="stem" x1="${cx - 7}" y1="${y}" x2="${cx - 7}" y2="${y + 32}" />`;
@@ -124,29 +111,34 @@ export class ScoreView {
       })
       .join("");
 
-    let barX = left - 18;
-    let acc = 0;
+    const measureDuration = beat * interpreted.measureBeats;
+    let lastMeasure = -1;
     const bars: string[] = [];
     this.events.forEach((event, index) => {
-      acc += event.duration / beat;
-      if (acc >= 3.9) {
-        const at = (xs[index] ?? left) + 22;
+      const measure = Math.floor(event.start / measureDuration);
+      if (measure > lastMeasure && index > 0) {
+        const at = (xs[index] ?? left) - 8;
         bars.push(`<line class="bar" x1="${at}" y1="${trebleY - 4 * gap}" x2="${at}" y2="${bassY}" />`);
-        acc = 0;
-        barX = at;
+        lastMeasure = measure;
+      } else if (index === 0) {
+        lastMeasure = measure;
       }
     });
-    void barX;
+
+    const header = notationHeaderMarkup(interpreted, trebleY, gap);
+    const beatGrid = beatGridMarkup(interpreted.events, xs, trebleY, bassY, gap);
 
     this.svgWidth = width;
     this.svgHeight = height;
     this.root.innerHTML = `
       <svg class="staff score" viewBox="0 0 ${width} ${height}" role="img" aria-label="Sheet music">
+        ${header}
         <text class="clef" x="28" y="${trebleY - gap}">G</text>
         <text class="clef" x="28" y="${bassY - gap * 3}">F</text>
         ${lines(trebleY)}
         ${lines(bassY)}
         <line class="brace" x1="16" y1="${trebleY - 4 * gap}" x2="16" y2="${bassY}" />
+        ${beatGrid}
         ${bars.join("")}
         ${heads}
       </svg>

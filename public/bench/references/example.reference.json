@@ -1,0 +1,9 @@
+{
+  "id": "example",
+  "title": "Example reference (replace with human-reviewed transcription)",
+  "notes": [
+    { "note": 60, "start": 0, "duration": 0.5, "velocity": 90 },
+    { "note": 64, "start": 0.5, "duration": 0.5, "velocity": 88 },
+    { "note": 67, "start": 1, "duration": 0.75, "velocity": 86 }
+  ]
+}
