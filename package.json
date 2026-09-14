@@ -1,0 +1,26 @@
+{
+  "name": "piano-coach",
+  "version": "0.1.0",
+  "description": "Learn piano with falling notes, courses, and MP3/MIDI transcription",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "scripts\\tauri.cmd dev",
+    "tauri:build": "scripts\\tauri.cmd build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.4",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5"
+  },
+  "dependencies": {
+    "@spotify/basic-pitch": "^1.0.1",
+    "@tauri-apps/api": "^2.11.1",
+    "fflate": "^0.8.3",
+    "onnxruntime-web": "^1.27.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Piano Coach",
+  "short_name": "Piano Coach",
+  "description": "Learn piano with a MIDI keyboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#14110e",
+  "theme_color": "#14110e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
