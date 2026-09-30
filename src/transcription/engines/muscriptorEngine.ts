@@ -10,7 +10,7 @@ export const muscriptorEngine: TranscriptionEngine = {
     stems: true,
     velocity: true,
     pedal: false,
-    desktopOnly: true,
+    desktopOnly: false,
   },
 
   async isAvailable(): Promise<boolean> {

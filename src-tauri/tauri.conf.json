@@ -27,6 +27,10 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": {
+      "../scripts/transcribe-muscriptor.py": "scripts/transcribe-muscriptor.py",
+      "../scripts/separate-stems.py": "scripts/separate-stems.py"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

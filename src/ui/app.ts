@@ -30,8 +30,13 @@ import { isMusicXmlFile, loadMusicXmlText, parseMusicXml } from "../music/musicX
 import { prettyChord, prettyName } from "../music/notes";
 import { formatPracticeSpeed, loadPracticeSpeed, PRACTICE_SPEEDS, savePracticeSpeed } from "../live/practiceSpeed";
 import { pieceDuration, scaleTimedNotes, type Piece, type TimedNote } from "../music/timed";
-import { checkModelSetup, friendlyTranscriptionError } from "../transcription";
-import { fixSemitoneSlips, limitExtremeFlood, polishHardChords } from "../music/cleanup";
+import { checkModelSetup, friendlyTranscriptionError, modelSetupSummary } from "../transcription";
+import {
+  combineHardScore,
+  fixSemitoneSlips,
+  limitExtremeFlood,
+  polishHardChords,
+} from "../music/cleanup";
 import { refineNoteDurations } from "../music/duration";
 import { applySongLevel, normalizeSongLevel, sourceNotesForLevel, type SongLevel } from "../music/difficulty";
 import { KEY_TONIC_OPTIONS, normalizeKeyPreference, resolveSongKey } from "../music/keys";
@@ -260,9 +265,9 @@ export function mountApp(host: HTMLElement): void {
             </label>
             <label>Track
               <select data-tile-mode>
-                <option value="voice" selected>Vocals (follows song)</option>
+                <option value="voice">Vocals only</option>
                 <option value="instruments">Piano</option>
-                <option value="both">All</option>
+                <option value="both" selected>All · full song</option>
                 <option value="left">Left hand</option>
                 <option value="right">Right hand</option>
               </select>
@@ -499,9 +504,15 @@ export function mountApp(host: HTMLElement): void {
       `<li class="import-step pending" data-import-step="${step.id}"><span class="step-mark">${index + 1}</span><span class="step-label">${step.label}</span></li>`,
   ).join("");
   const tileModeSelect = $<HTMLSelectElement>("[data-tile-mode]");
-  tileModeSelect.value = normalizeTileMode(localStorage.getItem("piano-coach-tile-mode") ?? "voice");
   const songLevelSelect = $<HTMLSelectElement>("[data-song-level]");
   songLevelSelect.value = normalizeSongLevel(localStorage.getItem("piano-coach-song-level") ?? "easy");
+  const initialLevel = normalizeSongLevel(songLevelSelect.value);
+  const defaultTile = initialLevel === "hard" ? "both" : "voice";
+  tileModeSelect.value = normalizeTileMode(localStorage.getItem("piano-coach-tile-mode") ?? defaultTile);
+  if (initialLevel === "hard" && tileModeSelect.value === "voice") {
+    tileModeSelect.value = "both";
+    localStorage.setItem("piano-coach-tile-mode", "both");
+  }
   const songKeySelect = $<HTMLSelectElement>("[data-song-key]");
   songKeySelect.innerHTML = KEY_TONIC_OPTIONS.map(
     (opt) => `<option value="${opt.value}">${opt.label}</option>`,
@@ -513,15 +524,23 @@ export function mountApp(host: HTMLElement): void {
   const songKeyPreference = () =>
     normalizeKeyPreference(songKeySelect.value, songModeSelect.value);
 
+  const hardScoreFromPiece = (piece: Piece): TimedNote[] => {
+    const voice = piece.voiceNotes ?? [];
+    const inst = polishHardChords(piece.instNotes ?? []);
+    return combineHardScore(voice, inst);
+  };
+
   const playbackLayers = (piece: Piece) => {
+    const voice = piece.voiceNotes ?? [];
+    const inst = piece.instNotes ?? [];
     const full =
-      piece.fullNotes ??
-      [...(piece.instNotes ?? []), ...(piece.voiceNotes ?? [])].sort(
-        (a, b) => a.start - b.start || a.note - b.note,
-      );
+      voice.length || inst.length
+        ? hardScoreFromPiece(piece)
+        : (piece.fullNotes ??
+          [...inst, ...voice].sort((a, b) => a.start - b.start || a.note - b.note));
     return {
-      voice: piece.voiceNotes,
-      instruments: piece.instNotes,
+      voice,
+      instruments: inst,
       leftHand: piece.leftHandNotes,
       rightHand: piece.rightHandNotes,
       all: full.length ? full : piece.notes,
@@ -531,21 +550,27 @@ export function mountApp(host: HTMLElement): void {
   const playbackMode = (_piece: Piece): ReturnType<typeof normalizeTileMode> => {
     const level = normalizeSongLevel(songLevelSelect.value);
     if (level === "easy") return "voice";
-    if (level === "hard") {
-      const chosen = normalizeTileMode(tileModeSelect.value);
-      return chosen === "voice" ? "both" : chosen;
-    }
+    if (level === "hard") return normalizeTileMode(tileModeSelect.value);
     return "both";
   };
 
   const rawNotesForPiece = (piece: Piece): TimedNote[] => {
     const level = normalizeSongLevel(songLevelSelect.value);
     const layers = playbackLayers(piece);
-    if (level === "easy" || level === "medium") {
-      return sourceNotesForLevel(layers, level, piece.notes);
+    let notes = sourceNotesForLevel(layers, level, piece.notes);
+    if (level === "hard") {
+      notes = applyTileMode(
+        {
+          voice: layers.voice ?? [],
+          instruments: layers.instruments ?? [],
+          leftHand: layers.leftHand,
+          rightHand: layers.rightHand,
+          all: notes,
+        },
+        playbackMode(piece),
+      );
     }
-    const source = applyTileMode(layers, playbackMode(piece));
-    return source.length ? source : piece.notes;
+    return notes.length ? notes : piece.notes;
   };
   const viewTabs = $<HTMLElement>("[data-view-tabs]");
   const playTransport = $<HTMLElement>("[data-play-transport]");
@@ -740,18 +765,9 @@ export function mountApp(host: HTMLElement): void {
   };
 
   const courseTrainingNotes = (piece: Piece, songLevel: SongLevel): TimedNote[] => {
-    const raw = sourceNotesForLevel(
-      {
-        voice: piece.voiceNotes,
-        instruments: piece.instNotes,
-        leftHand: piece.leftHandNotes,
-        rightHand: piece.rightHandNotes,
-        all: piece.fullNotes ?? piece.notes,
-      },
-      songLevel,
-      piece.notes,
-    );
-    let notes = applySongLevel(raw, songLevel, { tonic: "auto", mode: "auto" });
+    const layers = playbackLayers(piece);
+    const raw = sourceNotesForLevel(layers, songLevel, piece.notes);
+    let notes = applySongLevel(raw, songLevel, { tonic: "auto", mode: "auto" }, layers);
     if (songLevel === "hard") {
       notes = refineNoteDurations(polishHardChords(notes));
     } else {
@@ -815,11 +831,13 @@ export function mountApp(host: HTMLElement): void {
 
   const playableNotes = (piece: Piece) => {
     const level = normalizeSongLevel(songLevelSelect.value);
+    const layers = playbackLayers(piece);
     const raw = rawNotesForPiece(piece);
     const pref = songKeyPreference();
-    let notes = applySongLevel(raw, level, pref);
+    let notes = applySongLevel(raw, level, pref, layers);
     if (level === "hard") {
-      notes = refineNoteDurations(polishHardChords(notes));
+      // Piano polish runs in hardScoreFromPiece — do not re-polish merged vocals.
+      notes = refineNoteDurations(notes);
     } else {
       notes = refineNoteDurations(limitExtremeFlood(fixSemitoneSlips(notes)));
     }
@@ -1772,7 +1790,7 @@ export function mountApp(host: HTMLElement): void {
 
       const mode = normalizeTileMode(tileModeSelect.value);
       const target = normalizeTranscribeTarget(transcribeTargetSelect.value) as TranscribeTarget;
-      await probeMuScriptor();
+      await probeMuScriptor(true);
       importAbort = new AbortController();
       startImportPulse();
       let result;
@@ -1868,10 +1886,8 @@ export function mountApp(host: HTMLElement): void {
       )
       .join("");
     modelSetupHint.textContent = state.muscriptorAvailable
-      ? `MuScriptor ready${state.device === "cuda" ? " (GPU)" : state.device === "cpu" ? " (CPU)" : ""}.`
-      : state.isDesktop
-        ? "Complete the steps above for Songscription-quality transcription."
-        : "Browser mode uses Basic Pitch. Install the desktop app for MuScriptor.";
+      ? `${modelSetupSummary()}${state.isDesktop ? "" : " · via npm run dev"}`
+      : "Complete the steps above for MuScriptor. Basic Pitch is used until setup is done.";
   };
 
   practiceSpeedSelect.innerHTML = PRACTICE_SPEEDS.map(
@@ -2009,6 +2025,7 @@ export function mountApp(host: HTMLElement): void {
       const isMidi = /\.mid(i)?$/i.test(file.name) || file.type.includes("midi");
       const isXml = isMusicXmlFile(file.name, file.type);
       let piece: Piece;
+      let importEngine = "";
       if (isMidi) {
         const parsed = parseMidi(buffer);
         piece = {
@@ -2043,7 +2060,7 @@ export function mountApp(host: HTMLElement): void {
         void context.close();
         const mode = normalizeTileMode(tileModeSelect.value);
         const target = normalizeTranscribeTarget(transcribeTargetSelect.value) as TranscribeTarget;
-        await probeMuScriptor();
+        await probeMuScriptor(true);
         importAbort = new AbortController();
         startImportPulse();
         let result;
@@ -2065,6 +2082,7 @@ export function mountApp(host: HTMLElement): void {
           stopImportPulse();
           importAbort = null;
         }
+        importEngine = result.engine;
         piece = {
           id: `import-${Date.now()}`,
           title: file.name.replace(/\.[^.]+$/, ""),
@@ -2080,14 +2098,6 @@ export function mountApp(host: HTMLElement): void {
           audioDurationSec: audio.duration,
         };
         await saveLibraryPiece(piece, buffer, file.type || "audio/mpeg");
-        const melody = result.voiceNotes.length;
-        const inst = result.instNotes.length;
-        const engineLabel = result.engine.includes("muscriptor") ? MUSCRIPTOR_LABEL : result.engine;
-        setImportMessage(
-          melody > 0 && inst > 0
-            ? `Piano ${inst} + vocal ${melody} notes (${engineLabel}). Tiles: Piano / Vocals / Left / Right hand.`
-            : `Converted ${result.fullNotes.length} notes (${engineLabel}).`,
-        );
       }
       piece.savedAt = Date.now();
       saved = [piece, ...saved.filter((item) => item.id !== piece.id)];
@@ -2100,9 +2110,25 @@ export function mountApp(host: HTMLElement): void {
       loadSelectedPiece();
       syncPlayView();
       renderLiveHud();
-      setImportMessage(
-        `${piece.title}: ${(piece.fullNotes ?? piece.notes).length} notes transcribed (Hard = full song). Re-import old songs for the full transcription.`,
-      );
+      if (piece.source === "audio") {
+        const melody = piece.voiceNotes?.length ?? 0;
+        const inst = piece.instNotes?.length ?? 0;
+        const full = piece.fullNotes?.length ?? piece.notes.length;
+        const engine = importEngine.includes("muscriptor")
+          ? MUSCRIPTOR_LABEL
+          : importEngine || "transcribed";
+        const levelHint =
+          normalizeSongLevel(songLevelSelect.value) === "hard"
+            ? "Hard shows the full transcription."
+            : "Easy/Medium simplify for practice — switch Play level to Hard for every note.";
+        setImportMessage(
+          melody > 0 && inst > 0
+            ? `${piece.title}: ${full} notes (${engine}) — piano ${inst}, vocal ${melody}. ${levelHint}`
+            : `${piece.title}: ${full} notes (${engine || "transcribed"}). ${levelHint}`,
+        );
+      } else {
+        setImportMessage(`${piece.title}: ${piece.notes.length} notes saved.`);
+      }
       window.setTimeout(() => piano.centerOnMiddleC(), 80);
       if (isAudio) {
         finishImportOverlay(true, `${piece.title} is ready`);
@@ -2308,6 +2334,10 @@ export function mountApp(host: HTMLElement): void {
   };
 
   songLevelSelect.addEventListener("change", () => {
+    if (normalizeSongLevel(songLevelSelect.value) === "hard" && tileModeSelect.value === "voice") {
+      tileModeSelect.value = "both";
+      localStorage.setItem("piano-coach-tile-mode", "both");
+    }
     refreshSongLearning();
     if (playView === "review") refreshReviewEditor();
   });

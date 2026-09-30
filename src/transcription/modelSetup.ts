@@ -1,4 +1,9 @@
-import { muScriptorDevice, probeMuScriptor, resetMuScriptorProbe } from "../music/muscriptor";
+import {
+  fetchMuScriptorStatus,
+  muScriptorDevice,
+  muScriptorStatusNow,
+  resetMuScriptorProbe,
+} from "../music/muscriptor";
 
 export type ModelSetupStatus = "ready" | "missing" | "checking";
 
@@ -21,13 +26,7 @@ function isDesktop(): boolean {
   return "__TAURI_INTERNALS__" in window || "__TAURI__" in window;
 }
 
-export function modelSetupSteps(isDesktopApp: boolean): ModelSetupStep[] {
-  if (!isDesktopApp) {
-    return [
-      { id: "browser", label: "Browser mode uses Basic Pitch (no install)", done: true },
-      { id: "desktop", label: "Install the desktop app for MuScriptor quality", done: false },
-    ];
-  }
+export function modelSetupSteps(): ModelSetupStep[] {
   return [
     {
       id: "python",
@@ -53,20 +52,32 @@ export function modelSetupSteps(isDesktopApp: boolean): ModelSetupStep[] {
 export async function checkModelSetup(): Promise<ModelSetupState> {
   resetMuScriptorProbe();
   const desktop = isDesktop();
-  const muscriptorAvailable = desktop ? await probeMuScriptor() : false;
+  const status = await fetchMuScriptorStatus();
+  const muscriptorAvailable = Boolean(status?.available);
   const device = muScriptorDevice();
-  const steps = modelSetupSteps(desktop).map((step) => {
-    if (step.id === "browser") return { ...step, done: true };
-    if (muscriptorAvailable && (step.id === "python" || step.id === "hf" || step.id === "model")) {
-      return { ...step, done: true };
-    }
+  const modelReady = Boolean(status?.modelCached);
+  const steps = modelSetupSteps().map((step) => {
+    if (step.id === "python") return { ...step, done: muscriptorAvailable };
+    if (step.id === "hf") return { ...step, done: modelReady };
+    if (step.id === "model") return { ...step, done: modelReady };
     return step;
   });
+  const ready = muscriptorAvailable && modelReady;
   return {
-    status: muscriptorAvailable ? "ready" : desktop ? "missing" : "ready",
+    status: ready ? "ready" : "missing",
     muscriptorAvailable,
     device,
     isDesktop: desktop,
     steps,
   };
+}
+
+export function modelSetupSummary(): string {
+  const status = muScriptorStatusNow();
+  if (!status?.available) return "MuScriptor not detected.";
+  const model = status.model ?? "large";
+  const mode = status.fast ? "fast" : "quality";
+  const cache = status.modelCached ? "weights cached" : "weights not cached yet";
+  const device = status.device === "cuda" ? "GPU" : status.device === "cpu" ? "CPU" : "device unknown";
+  return `MuScriptor ${model} (${mode}, ${device}, ${cache}).`;
 }

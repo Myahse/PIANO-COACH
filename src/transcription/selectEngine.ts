@@ -10,7 +10,7 @@ export function listTranscriptionEngines(): TranscriptionEngine[] {
   return ENGINES;
 }
 
-/** Pick engine: MuScriptor on desktop when available, else Basic Pitch. */
+/** Prefer MuScriptor when available (desktop or Vite dev server); else Basic Pitch. */
 export async function selectTranscriptionEngine(
   preference: EnginePreference = "auto",
 ): Promise<TranscriptionEngine> {
@@ -20,5 +20,8 @@ export async function selectTranscriptionEngine(
     throw new Error("MuScriptor is not installed. Complete AI setup in Settings first.");
   }
   if (await muscriptorEngine.isAvailable()) return muscriptorEngine;
+  console.warn(
+    "[transcription] MuScriptor unavailable — falling back to Basic Pitch. Check Settings → AI setup.",
+  );
   return basicPitchEngine;
 }

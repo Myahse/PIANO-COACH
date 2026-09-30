@@ -4,6 +4,8 @@ import type { AudioAnalysis } from "./types";
 
 export type SeparationResult = {
   file: File;
+  /** Vocal stem or full mix for melody transcription. */
+  vocalFile?: File;
   applied: boolean;
   backend?: "demucs" | "heuristic";
   message?: string;
@@ -41,9 +43,10 @@ export async function separatePianoStem(
     if (stems.stemFile) {
       return {
         file: stems.stemFile,
+        vocalFile: stems.vocalFile ?? file,
         applied: true,
         backend: "demucs",
-        message: "Demucs instrument stem applied before transcription.",
+        message: "Demucs stems applied — piano and vocals transcribed separately.",
       };
     }
 
@@ -54,9 +57,10 @@ export async function separatePianoStem(
     );
     return {
       file: stemFile,
+      vocalFile: stems.vocalFile ?? file,
       applied: true,
       backend: "heuristic",
-      message: "Light instrument stem applied before transcription.",
+      message: "Light stems applied — piano and vocals transcribed separately.",
     };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;

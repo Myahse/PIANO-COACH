@@ -30,7 +30,7 @@ function estimateVocalPresence(mono: Float32Array, sampleRate: number): number {
 
 function profileFromAnalysis(vocalPresence: number, force?: AudioProfile): AudioProfile {
   if (force) return force;
-  if (vocalPresence >= 0.42) return "full_song";
+  if (vocalPresence >= 0.52) return "full_song";
   if (vocalPresence <= 0.28) return "solo_piano";
   return "unknown";
 }

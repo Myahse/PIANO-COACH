@@ -63,27 +63,57 @@ export function resetMuScriptorProbe(): void {
   muscriptorAvailable = null;
 }
 
-export async function probeMuScriptor(): Promise<boolean> {
-  if (muscriptorAvailable !== null) return muscriptorAvailable;
+export type MuScriptorStatus = {
+  available: boolean;
+  python?: string;
+  script?: string;
+  model?: string;
+  fast?: boolean;
+  modelCached?: boolean;
+  device?: string | null;
+};
+
+let muscriptorStatus: MuScriptorStatus | null = null;
+
+export function muScriptorStatusNow(): MuScriptorStatus | null {
+  return muscriptorStatus;
+}
+
+export async function fetchMuScriptorStatus(): Promise<MuScriptorStatus> {
   try {
     if (isTauri()) {
       const { invoke } = await import("@tauri-apps/api/core");
-      muscriptorAvailable = await invoke<boolean>("muscriptor_available");
-      return muscriptorAvailable;
+      const body = await invoke<MuScriptorStatus>("muscriptor_status");
+      muscriptorStatus = body;
+      muscriptorAvailable = Boolean(body.available);
+      muscriptorDevice = body.device === "cuda" ? "cuda" : body.device === "cpu" ? "cpu" : null;
+      return body;
     }
     const res = await fetch("/api/muscriptor/status");
     if (!res.ok) {
+      const unavailable = { available: false };
+      muscriptorStatus = unavailable;
       muscriptorAvailable = false;
-      return false;
+      return unavailable;
     }
-    const body = (await res.json()) as { available?: boolean; device?: string };
+    const body = (await res.json()) as MuScriptorStatus;
+    muscriptorStatus = body;
     muscriptorAvailable = Boolean(body.available);
     muscriptorDevice = body.device === "cuda" ? "cuda" : body.device === "cpu" ? "cpu" : null;
-    return muscriptorAvailable;
+    return body;
   } catch {
+    const unavailable = { available: false };
+    muscriptorStatus = unavailable;
     muscriptorAvailable = false;
-    return false;
+    return unavailable;
   }
+}
+
+export async function probeMuScriptor(force = false): Promise<boolean> {
+  if (!force && muscriptorAvailable !== null) return muscriptorAvailable;
+  if (force) resetMuScriptorProbe();
+  const status = await fetchMuScriptorStatus();
+  return status.available;
 }
 
 export async function transcribeWithMuScriptor(

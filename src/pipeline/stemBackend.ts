@@ -1,4 +1,5 @@
 import { separateWithDemucs } from "../audio/demucsStem";
+import { monoSamplesToWavFile } from "../audio/wavFile";
 import { prepareSources, type AudioSources } from "../music/separate";
 
 export type StemBackend = "demucs" | "heuristic";
@@ -11,6 +12,7 @@ export type StemSeparationResult = {
   vocal?: Float32Array;
   /** When Demucs succeeds, ready-to-transcribe WAV for the engine. */
   stemFile?: File;
+  vocalFile?: File;
 };
 
 const MODEL_RATE = 22050;
@@ -44,14 +46,15 @@ export async function separateAudioStems(
     const audioBytes = await file.arrayBuffer();
     throwIfAborted(opts.signal);
     opts.onProgress?.(25, "Piano isolation · Demucs stem split…");
-    const stemFile = await separateWithDemucs(audioBytes, file.name, opts.signal);
-    if (stemFile) {
-      opts.onProgress?.(100, "Piano isolation · Demucs instrument stem ready");
+    const demucs = await separateWithDemucs(audioBytes, file.name, opts.signal);
+    if (demucs) {
+      opts.onProgress?.(100, "Piano isolation · Demucs stems ready");
       return {
         backend: "demucs",
         instruments: new Float32Array(0),
         sampleRate: buffer.sampleRate,
-        stemFile,
+        stemFile: demucs.instruments,
+        vocalFile: demucs.vocal,
       };
     }
   } catch (error) {
@@ -62,7 +65,16 @@ export async function separateAudioStems(
   opts.onProgress?.(40, "Piano isolation · heuristic filter…");
   const heuristic = await heuristicStems(buffer, maxSeconds);
   opts.onProgress?.(100, "Piano isolation · instrument stem ready");
-  return heuristic;
+  return {
+    ...heuristic,
+    vocalFile: heuristic.vocal
+      ? monoSamplesToWavFile(
+          heuristic.vocal,
+          heuristic.sampleRate,
+          file.name.replace(/\.[^.]+$/, "") + "-vocals.wav",
+        )
+      : undefined,
+  };
 }
 
 export type { AudioSources };
