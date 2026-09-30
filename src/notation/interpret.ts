@@ -1,6 +1,7 @@
 import { detectSongKey, resolveSongKey, type KeyPreference, type ResolvedKey } from "../music/keys";
 import { isBlackKey, noteName, pc } from "../music/notes";
 import type { TimedNote } from "../music/timed";
+import { estimateBeatGrid } from "./tempo";
 
 export type InterpretedEvent = {
   start: number;
@@ -14,6 +15,8 @@ export type InterpretedScore = {
   key: ResolvedKey;
   bpm: number;
   beatDuration: number;
+  /** Time (s) of the first beat of measure 0. */
+  gridOrigin: number;
   measureBeats: number;
   events: InterpretedEvent[];
 };
@@ -25,23 +28,6 @@ const FLAT_SPELL: Record<number, string> = {
   8: "A♭",
   10: "B♭",
 };
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0.5;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? 0.5;
-}
-
-function estimateBeatDuration(notes: TimedNote[]): number {
-  const gaps: number[] = [];
-  const sorted = [...notes].sort((a, b) => a.start - b.start);
-  for (let i = 1; i < sorted.length; i++) {
-    const gap = sorted[i]!.start - sorted[i - 1]!.start;
-    if (gap >= 0.08 && gap <= 2.5) gaps.push(gap);
-  }
-  const base = median(gaps.length ? gaps : notes.map((n) => n.duration));
-  return Math.max(0.25, Math.min(1.2, base));
-}
 
 function quantizeTime(value: number, grid: number): number {
   return Math.round(value / grid) * grid;
@@ -63,16 +49,19 @@ export function interpretForNotation(
   keyPref: KeyPreference = { tonic: "auto", mode: "auto" },
 ): InterpretedScore {
   const key = resolveSongKey(notes, keyPref);
-  const beatDuration = estimateBeatDuration(notes);
+  const { beatDuration, offset } = estimateBeatGrid(notes);
   const bpm = Math.round(60 / beatDuration);
   const measureBeats = 4;
   const measureDuration = beatDuration * measureBeats;
   const grid = beatDuration / 4;
 
   const sorted = [...notes].sort((a, b) => a.start - b.start || a.note - b.note);
+  // Start the grid on the last beat at or before the first note (pickup notes stay in measure 0).
+  const firstStart = sorted[0]?.start ?? 0;
+  const gridOrigin = offset - Math.max(0, Math.ceil((offset - firstStart - grid / 2) / beatDuration)) * beatDuration;
   const events: InterpretedEvent[] = [];
   for (const note of sorted) {
-    const start = quantizeTime(note.start, grid);
+    const start = gridOrigin + quantizeTime(note.start - gridOrigin, grid);
     const duration = Math.max(grid, quantizeTime(note.duration, grid));
     const last = events.at(-1);
     if (last && Math.abs(start - last.start) < grid * 0.5) {
@@ -80,12 +69,12 @@ export function interpretForNotation(
       last.duration = Math.max(last.duration, duration);
       continue;
     }
-    const beat = Math.floor(start / beatDuration);
-    const measure = Math.floor(start / measureDuration);
+    const beat = Math.max(0, Math.floor((start - gridOrigin + 1e-6) / beatDuration));
+    const measure = Math.max(0, Math.floor((start - gridOrigin + 1e-6) / measureDuration));
     events.push({ start, duration, midi: [note.note], beat, measure });
   }
 
-  return { key, bpm, beatDuration, measureBeats, events };
+  return { key, bpm, beatDuration, gridOrigin, measureBeats, events };
 }
 
 /** Fallback when no interpreted key — used by legacy callers. */

@@ -35,6 +35,19 @@ async function resampleToModel(buffer: AudioBuffer): Promise<Float32Array> {
   return rendered.getChannelData(0).slice();
 }
 
+/** Pitch wobble within a note, in semitones (bends are in 1/3-semitone contour bins). */
+function bendSpread(bends: number[] | undefined): number {
+  if (!bends || bends.length < 3) return 0;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const b of bends) {
+    if (b < min) min = b;
+    if (b > max) max = b;
+  }
+  return (max - min) / 3;
+}
+
+/** Notes carry `bendSpread`: sung / bowed notes wobble in pitch, piano notes do not. */
 export async function runBasicPitchPath(buffer: AudioBuffer) {
   model ??= new BasicPitch(MODEL_URL);
   const samples = await resampleToModel(buffer);
@@ -71,6 +84,7 @@ export async function runBasicPitchPath(buffer: AudioBuffer) {
       start: event.startTimeSeconds,
       duration: Math.max(0.03, event.durationSeconds),
       velocity: Math.round(40 + Math.min(1, Math.max(0, event.amplitude)) * 80),
+      bendSpread: bendSpread(event.pitchBends),
     }))
     .sort((a, b) => a.start - b.start || a.note - b.note);
 }

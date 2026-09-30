@@ -111,11 +111,10 @@ export class ScoreView {
       })
       .join("");
 
-    const measureDuration = beat * interpreted.measureBeats;
     let lastMeasure = -1;
     const bars: string[] = [];
-    this.events.forEach((event, index) => {
-      const measure = Math.floor(event.start / measureDuration);
+    interpreted.events.forEach((event, index) => {
+      const measure = event.measure;
       if (measure > lastMeasure && index > 0) {
         const at = (xs[index] ?? left) - 8;
         bars.push(`<line class="bar" x1="${at}" y1="${trebleY - 4 * gap}" x2="${at}" y2="${bassY}" />`);
