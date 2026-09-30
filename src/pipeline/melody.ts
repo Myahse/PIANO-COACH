@@ -11,6 +11,11 @@ const MELODY_LOW = 48;
 const MELODY_HIGH = 96;
 /** Pitch wobble (semitones) above which a note is sung/bowed, not a piano overtone. */
 const VIBRATO_SPREAD = 0.3;
+/** Steady-pitch (no vibrato) leftovers must be at least this long to count as melody. */
+const MIN_STEADY_DURATION = 0.25;
+/** A real melody line is a meaningful share of the piece; a few stray leftovers are noise. */
+const MIN_LINE_NOTES = 4;
+const MIN_LINE_SHARE = 0.15;
 
 function isExplainedByPiano(note: MelodyCandidate, piano: TimedNote[]): boolean {
   // Piano notes hold a steady pitch; vibrato means a voice (even one doubling the piano's octave).
@@ -72,11 +77,14 @@ export function extractResidualMelody(candidates: MelodyCandidate[], piano: Time
   const residual = candidates.filter(
     (note) =>
       note.duration >= MIN_MELODY_DURATION &&
+      (note.duration >= MIN_STEADY_DURATION || (note.bendSpread ?? 0) >= VIBRATO_SPREAD) &&
       note.note >= MELODY_LOW &&
       note.note <= MELODY_HIGH &&
       !isExplainedByPiano(note, pianoSorted),
   );
-  return dropIsolated(skyline(residual)).map(({ note, start, duration, velocity }) => ({
+  const line = dropIsolated(skyline(residual));
+  if (line.length < Math.max(MIN_LINE_NOTES, piano.length * MIN_LINE_SHARE)) return [];
+  return line.map(({ note, start, duration, velocity }) => ({
     note,
     start,
     duration,

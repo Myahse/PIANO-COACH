@@ -35,6 +35,11 @@ describe("extractResidualMelody", () => {
     expect(extractResidualMelody([n(72, 2.03, 0.8), n(76, 2.9, 0.5)], pianoChords).map((m) => m.note)).not.toContain(72);
   });
 
+  it("ignores a few stray leftovers on a solo-piano take", () => {
+    const strays = [n(60, 2.1, 0.3), n(60, 2.5, 0.3), n(62, 3.1, 0.3)];
+    expect(extractResidualMelody(strays, pianoChords)).toEqual([]);
+  });
+
   it("drops isolated one-off blips", () => {
     const melody = extractResidualMelody([n(81, 3.3, 0.2), n(62, 9, 0.4)], pianoChords.slice(0, 3));
     expect(melody).toEqual([]);

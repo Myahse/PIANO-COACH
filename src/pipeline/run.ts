@@ -4,6 +4,9 @@ import { analyzeAudio } from "./preprocess";
 import { separatePianoStem, type SeparationResult } from "./separation";
 import { transcribeDualStems, transcribeToRawMidi } from "./transcribeStage";
 import { applyMidiIntelligence } from "./intelligence";
+import { extractResidualMelody } from "./melody";
+import { runBasicPitchPath } from "../bench/basicPitchOnly";
+import type { RawMidiLayers } from "./types";
 
 const STAGE_RANGE: Record<PipelineStage, [number, number]> = {
   preprocess: [0, 12],
@@ -66,6 +69,23 @@ export function vocalSourceForDualPass(separation: SeparationResult, original: F
 }
 
 /**
+ * Piano-only models (Transkun) drop vocals / lead lines. Run a general transcriber over the
+ * same audio and keep the melody the piano notes do not explain. No-op on solo piano.
+ */
+async function recoverMelody(raw: RawMidiLayers, buffer: AudioBuffer, signal?: AbortSignal): Promise<RawMidiLayers> {
+  try {
+    const candidates = await runBasicPitchPath(buffer);
+    throwIfAborted(signal);
+    const voiceNotes = extractResidualMelody(candidates, raw.instNotes);
+    return voiceNotes.length ? { ...raw, voiceNotes, engine: `${raw.engine}+melody` } : raw;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    console.warn("[transcription] melody pass failed — keeping piano notes only", error);
+    return raw;
+  }
+}
+
+/**
  * Full import pipeline:
  *
  * MP3 → preprocess → [separation] → MuScriptor → MIDI intelligence → score
@@ -107,7 +127,7 @@ export async function runImportPipeline(
   }
 
   report("transcribe", 0, "Detecting notes…", onProgress);
-  let raw;
+  let raw: RawMidiLayers;
   if (shouldDualTranscribe(target, analysis.profile, separation)) {
     const pianoFile = separation.file;
     const vocalFile = vocalSourceForDualPass(separation, file);
@@ -124,6 +144,10 @@ export async function runImportPipeline(
       signal,
       options.engine ?? "auto",
     );
+    // Heuristic separation: the "vocal" pass ran on the full mix, so it re-detects the piano too.
+    if (vocalFile === file && !raw.engine.includes("muscriptor")) {
+      raw = { ...raw, voiceNotes: extractResidualMelody(raw.voiceNotes, raw.instNotes) };
+    }
   } else {
     let audioFile = file;
     let transcribeBuffer = buffer;
@@ -145,6 +169,10 @@ export async function runImportPipeline(
       signal,
       options.engine ?? "auto",
     );
+    if (target === "both" && raw.voiceNotes.length === 0 && raw.engine.startsWith("transkun")) {
+      report("transcribe", 97, "Finding the melody…", onProgress);
+      raw = await recoverMelody(raw, transcribeBuffer, signal);
+    }
   }
   throwIfAborted(signal);
 
