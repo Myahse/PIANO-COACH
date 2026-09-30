@@ -50,7 +50,7 @@ export function applyTileMode(source: TimedNote[] | NoteLayers, mode: TileMode):
 
 export type TranscribeOptions = {
   signal?: AbortSignal;
-  engine?: "auto" | "muscriptor" | "basic-pitch";
+  engine?: "auto" | "muscriptor" | "transkun" | "basic-pitch";
 };
 
 export async function transcribeAudioFile(

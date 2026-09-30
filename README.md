@@ -52,7 +52,9 @@ For high-quality MP3-to-MIDI transcription on desktop, set up the MuScriptor Pyt
 
 MuScriptor models are downloaded from Hugging Face (~5 GB for the large model). Accept the model license on Hugging Face before downloading.
 
-A lighter in-browser fallback uses [Spotify Basic Pitch](https://github.com/spotify/basic-pitch) when Python backends are unavailable.
+Without the Python backends, songs are transcribed in the browser by **Transkun V2**, a dedicated piano transcription model (ONNX, bundled under `public/models/transkun/`). [Spotify Basic Pitch](https://github.com/spotify/basic-pitch) is used only for vocal-only targets or when Transkun cannot load.
+
+Engine order: MuScriptor (desktop) → Transkun V2 (browser) → Basic Pitch (fallback).
 
 ## Architecture
 
@@ -73,7 +75,7 @@ MP3 / audio
            │                     │
            └──────────┬──────────┘
                       ▼
-              MuScriptor Large     (src/pipeline/transcribeStage.ts)
+  MuScriptor → Transkun V2 → Basic Pitch  (src/pipeline/transcribeStage.ts)
                       │
                       ▼
                  Raw MIDI

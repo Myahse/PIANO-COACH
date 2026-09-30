@@ -137,44 +137,89 @@ def instruments_for(target: str) -> list[str] | None:
     return ["acoustic_piano", "voice"]
 
 
-def parse_track_notes(track, ticks_per_beat: int, tempo: int) -> tuple[list[dict], set[int]]:
+def build_tempo_map(midi) -> list[tuple[int, int]]:
+    """Collect (tick, tempo) changes from every track.
+
+    In type-1 MIDI files tempo lives in the conductor track only, so each note track must use
+    the shared map — parsing tracks with their own default 120 BPM drifts notes out of sync
+    whenever the file's tempo is not exactly 120 (MuScriptor writes a beat-grid tempo map).
+    """
+    changes: list[tuple[int, int]] = []
+    for track in midi.tracks:
+        tick = 0
+        for msg in track:
+            tick += msg.time
+            if msg.type == "set_tempo":
+                changes.append((tick, msg.tempo))
+    changes.sort(key=lambda c: c[0])
+    tempo_map: list[tuple[int, int]] = [(0, 500_000)]
+    for tick, tempo in changes:
+        if tempo_map[-1][0] == tick:
+            tempo_map[-1] = (tick, tempo)
+        else:
+            tempo_map.append((tick, tempo))
+    return tempo_map
+
+
+def make_tick_to_seconds(midi) -> Callable[[int], float]:
     import mido
 
+    ticks_per_beat = midi.ticks_per_beat or 480
+    tempo_map = build_tempo_map(midi)
+    # Seconds elapsed at the start of each tempo segment.
+    seg_seconds = [0.0]
+    for i in range(1, len(tempo_map)):
+        prev_tick, prev_tempo = tempo_map[i - 1]
+        tick, _ = tempo_map[i]
+        seg_seconds.append(seg_seconds[-1] + mido.tick2second(tick - prev_tick, ticks_per_beat, prev_tempo))
+
+    def to_seconds(tick: int) -> float:
+        lo, hi = 0, len(tempo_map) - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if tempo_map[mid][0] <= tick:
+                lo = mid
+            else:
+                hi = mid - 1
+        seg_tick, seg_tempo = tempo_map[lo]
+        return seg_seconds[lo] + mido.tick2second(tick - seg_tick, ticks_per_beat, seg_tempo)
+
+    return to_seconds
+
+
+def parse_track_notes(track, to_seconds: Callable[[int], float]) -> tuple[list[dict], set[int]]:
     notes: list[dict] = []
     programs: set[int] = set()
-    t = 0.0
-    open_notes: dict[tuple[int, int], tuple[float, int]] = {}
+    tick = 0
+    # Stack per (channel, pitch) so a re-attack before note-off does not drop the earlier note.
+    open_notes: dict[tuple[int, int], list[tuple[float, int]]] = {}
 
-    for msg in track:
-        t += mido.tick2second(msg.time, ticks_per_beat, tempo)
-        if msg.type == "set_tempo":
-            tempo = msg.tempo
-        elif msg.type == "program_change":
-            programs.add(msg.program)
-        elif msg.type == "note_on" and msg.velocity > 0:
-            open_notes[(msg.channel, msg.note)] = (t, msg.velocity)
-        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-            hit = open_notes.pop((msg.channel, msg.note), None)
-            if hit:
-                start, vel = hit
-                notes.append(
-                    {
-                        "note": int(msg.note),
-                        "start": round(start, 4),
-                        "duration": round(max(0.05, t - start), 4),
-                        "velocity": int(vel),
-                    }
-                )
-
-    for (channel, note), (start, vel) in open_notes.items():
+    def close(key: tuple[int, int], end: float) -> None:
+        stack = open_notes.get(key)
+        if not stack:
+            return
+        start, vel = stack.pop(0)
         notes.append(
             {
-                "note": int(note),
+                "note": int(key[1]),
                 "start": round(start, 4),
-                "duration": 0.2,
+                "duration": round(max(0.03, end - start), 4),
                 "velocity": int(vel),
             }
         )
+
+    for msg in track:
+        tick += msg.time
+        if msg.type == "program_change":
+            programs.add(msg.program)
+        elif msg.type == "note_on" and msg.velocity > 0:
+            open_notes.setdefault((msg.channel, msg.note), []).append((to_seconds(tick), msg.velocity))
+        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+            close((msg.channel, msg.note), to_seconds(tick))
+
+    for (channel, note), stack in open_notes.items():
+        for start, vel in stack:
+            notes.append({"note": int(note), "start": round(start, 4), "duration": 0.2, "velocity": int(vel)})
 
     return notes, programs
 
@@ -183,13 +228,12 @@ def parse_midi_layers(path: Path, target: str) -> tuple[list[dict], list[dict]]:
     import mido
 
     midi = mido.MidiFile(str(path))
-    ticks_per_beat = midi.ticks_per_beat or 480
+    to_seconds = make_tick_to_seconds(midi)
     inst: list[dict] = []
     voice: list[dict] = []
 
     for track in midi.tracks:
-        tempo = 500_000
-        notes, programs = parse_track_notes(track, ticks_per_beat, tempo)
+        notes, programs = parse_track_notes(track, to_seconds)
         if not notes:
             continue
         name = getattr(track, "name", "") or ""
@@ -215,32 +259,12 @@ def parse_midi_layers(path: Path, target: str) -> tuple[list[dict], list[dict]]:
 def parse_midi_flat(path: Path) -> list[dict]:
     import mido
 
+    midi = mido.MidiFile(str(path))
+    to_seconds = make_tick_to_seconds(midi)
     notes: list[dict] = []
-    tempo = 500_000
-    ticks_per_beat = 480
-    open_notes: dict[int, tuple[float, int]] = {}
-
-    for track in mido.MidiFile(str(path)).tracks:
-        t = 0.0
-        for msg in track:
-            t += mido.tick2second(msg.time, ticks_per_beat, tempo)
-            if msg.type == "set_tempo":
-                tempo = msg.tempo
-            elif msg.type == "note_on" and msg.velocity > 0:
-                open_notes[msg.note] = (t, msg.velocity)
-            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                hit = open_notes.pop(msg.note, None)
-                if hit:
-                    start, vel = hit
-                    notes.append(
-                        {
-                            "note": int(msg.note),
-                            "start": round(start, 4),
-                            "duration": round(max(0.05, t - start), 4),
-                            "velocity": int(vel),
-                        }
-                    )
-
+    for track in midi.tracks:
+        track_notes, _ = parse_track_notes(track, to_seconds)
+        notes.extend(track_notes)
     notes.sort(key=lambda n: (n["start"], n["note"]))
     return notes
 

@@ -23,8 +23,9 @@ export const basicPitchEngine: TranscriptionEngine = {
     const notes = await runBasicPitchPath(input.buffer);
     if (options.signal?.aborted) throw new DOMException("Transcription cancelled.", "AbortError");
     options.onProgress?.(85, "Basic Pitch · notes detected");
+    // One undivided note set: putting it in both layers would double every note in the full score.
     const instNotes = options.target === "vocals" ? [] : notes;
-    const voiceNotes = options.target === "piano" ? [] : notes;
+    const voiceNotes = options.target === "vocals" ? notes : [];
     return {
       voiceNotes,
       instNotes,

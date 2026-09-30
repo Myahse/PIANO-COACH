@@ -29,6 +29,16 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Transcription cancelled.", "AbortError");
 }
 
+async function decodeAudioFile(file: File): Promise<AudioBuffer | null> {
+  if (typeof OfflineAudioContext === "undefined") return null;
+  try {
+    const ctx = new OfflineAudioContext(1, 1, 44100);
+    return await ctx.decodeAudioData(await file.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Full import pipeline:
  *
@@ -54,6 +64,7 @@ export async function runImportPipeline(
   }
 
   let audioFile = file;
+  let audioBuffer = buffer;
   let separationApplied = false;
 
   if (options.enableSeparation !== false && analysis.profile === "full_song") {
@@ -69,13 +80,17 @@ export async function runImportPipeline(
     );
     audioFile = sep.file;
     separationApplied = sep.applied;
+    // Browser engines read the decoded buffer, not the file — decode the stem so they hear it too.
+    if (sep.applied && sep.file !== file) {
+      audioBuffer = (await decodeAudioFile(sep.file)) ?? buffer;
+    }
     throwIfAborted(signal);
   }
 
-  report("transcribe", 0, "Detecting notes · MuScriptor…", onProgress);
+  report("transcribe", 0, "Detecting notes…", onProgress);
   const raw = await transcribeToRawMidi(
     audioFile,
-    buffer,
+    audioBuffer,
     options.target ?? "both",
     (enginePct, label) => {
       report("transcribe", enginePct, label ?? "Detecting notes…", onProgress);

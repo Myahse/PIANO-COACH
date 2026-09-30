@@ -1,6 +1,9 @@
 import * as ort from 'onnxruntime-web'
+// Bundle the ONNX runtime locally so Transkun works offline and in the desktop app (no CDN fetch).
+import ortWasmMjs from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url'
+import ortWasm from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url'
 
-ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/'
+ort.env.wasm.wasmPaths = { mjs: ortWasmMjs, wasm: ortWasm }
 ort.env.wasm.numThreads = 1
 ort.env.wasm.simd = true
 

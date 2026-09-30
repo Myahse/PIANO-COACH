@@ -48,7 +48,7 @@ export type PipelineOptions = {
   quantize?: boolean;
   quantizeStep?: number;
   signal?: AbortSignal;
-  engine?: "auto" | "muscriptor" | "basic-pitch";
+  engine?: "auto" | "muscriptor" | "transkun" | "basic-pitch";
 };
 
 export type PipelineResult = IntelligentScore & {
