@@ -1,4 +1,4 @@
-import { prepareMelodyNotes, preparePianoNotes, quantizeNotes } from "../music/cleanup";
+import { combineHardScore, prepareMelodyNotes, preparePianoNotes, quantizeNotes } from "../music/cleanup";
 import { splitHands } from "../music/handSplit";
 import type { TimedNote } from "../music/timed";
 import type { IntelligentScore, RawMidiLayers } from "./types";
@@ -30,7 +30,7 @@ export function applyMidiIntelligence(
   }
 
   const { left, right } = splitHands(instNotes);
-  const fullNotes = sortNotes([...instNotes, ...voiceNotes]);
+  const fullNotes = sortNotes(combineHardScore(voiceNotes, instNotes));
 
   return {
     voiceNotes,

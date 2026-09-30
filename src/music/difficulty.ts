@@ -1,3 +1,4 @@
+import { mergeScoreLayers } from "./cleanup";
 import { resolveSongKey, type KeyPreference, type ResolvedKey } from "./keys";
 import { mergeTiedNotes, type TimedNote } from "./timed";
 
@@ -16,31 +17,55 @@ export function normalizeSongLevel(value: string): SongLevel {
   return "medium";
 }
 
-/** Pick note layers per level: Easy = vocals, Hard = full song, Medium = both stems. */
+function sorted(notes: TimedNote[]): TimedNote[] {
+  return [...notes].sort((a, b) => a.start - b.start || a.note - b.note);
+}
+
+/** Pick note layers per level: Easy = vocal stem, Medium = merged mix, Hard = full score. */
 export function sourceNotesForLevel(layers: NoteLayers, level: SongLevel, fallback: TimedNote[]): TimedNote[] {
   const voice = layers.voice ?? [];
   const inst = layers.instruments ?? [];
-  const all = layers.all ?? [...voice, ...inst];
+  const all = layers.all ?? [];
 
   if (level === "easy") {
-    return voice.length ? voice.slice() : fallback.slice();
+    return voice.length ? voice.slice() : fallback.length ? fallback.slice() : sorted(all);
   }
+
+  const merged = mergeScoreLayers(voice, inst);
+
   if (level === "hard") {
-    return all.length ? all.slice().sort((a, b) => a.start - b.start || a.note - b.note) : fallback.slice();
+    if (all.length) return sorted(all);
+    if (merged.length) return merged;
+    return fallback.slice();
   }
-  const merged = [...voice, ...inst].sort((a, b) => a.start - b.start || a.note - b.note);
-  return merged.length ? merged : all.length ? all.slice() : fallback.slice();
+
+  // Medium — vocal + piano mix (simplified later in applySongLevel)
+  if (merged.length) return merged;
+  if (all.length) return sorted(all);
+  return fallback.slice();
 }
 
 export function applySongLevel(
   notes: TimedNote[],
   level: SongLevel,
   keyPref: KeyPreference = { tonic: "auto", mode: "auto" },
+  layers?: NoteLayers,
 ): TimedNote[] {
-  if (notes.length === 0) return [];
+  if (notes.length === 0 && !(level === "medium" && layers?.voice?.length)) return [];
   if (level === "easy") return notes.map((note) => ({ ...note }));
   if (level === "hard") return notes.map((note) => ({ ...note }));
 
+  // Medium — simplify piano accompaniment, keep vocal melody timing intact.
+  if (layers?.voice?.length && layers.instruments?.length) {
+    const voice = layers.voice.map((note) => ({ ...note }));
+    const inst = simplifyNotes(layers.instruments, keyPref);
+    return mergeScoreLayers(voice, inst);
+  }
+
+  return simplifyNotes(notes, keyPref);
+}
+
+function simplifyNotes(notes: TimedNote[], keyPref: KeyPreference): TimedNote[] {
   const key = resolveSongKey(notes, keyPref);
   const sorted = mergeTiedNotes(notes, 0.16);
   const stats = measureSong(sorted);

@@ -20,23 +20,33 @@ export function resetDemucsProbe(): void {
   demucsProbe = null;
 }
 
-/** Run Demucs two-stem split via desktop Python. Returns instrument stem WAV bytes. */
+export type DemucsStems = {
+  instruments: File;
+  vocal: File;
+};
+
+/** Run Demucs two-stem split via desktop Python. Returns vocal + backing WAV files. */
 export async function separateWithDemucs(
   audio: ArrayBuffer,
   filename: string,
   signal?: AbortSignal,
-): Promise<File | null> {
+): Promise<DemucsStems | null> {
   if (signal?.aborted) throw new DOMException("Transcription cancelled.", "AbortError");
   if (!(await demucsAvailable())) return null;
 
   const { invoke } = await import("@tauri-apps/api/core");
-  const bytes = await invoke<number[]>("separate_stems", {
+  const result = await invoke<{ instruments: number[]; vocal: number[] }>("separate_stems", {
     audio: Array.from(new Uint8Array(audio)),
     filename,
   });
   if (signal?.aborted) throw new DOMException("Transcription cancelled.", "AbortError");
-  if (!bytes?.length) return null;
+  if (!result?.instruments?.length || !result?.vocal?.length) return null;
 
   const safe = filename.replace(/\.[^.]+$/, "") || "stem";
-  return new File([new Uint8Array(bytes)], `${safe}-piano-stem.wav`, { type: "audio/wav" });
+  return {
+    instruments: new File([new Uint8Array(result.instruments)], `${safe}-backing.wav`, {
+      type: "audio/wav",
+    }),
+    vocal: new File([new Uint8Array(result.vocal)], `${safe}-vocals.wav`, { type: "audio/wav" }),
+  };
 }

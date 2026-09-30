@@ -1,7 +1,8 @@
+import { decodeAudioFile } from "../audio/decode";
 import type { PipelineOptions, PipelineProgress, PipelineResult, PipelineStage } from "./types";
 import { analyzeAudio } from "./preprocess";
-import { separatePianoStem } from "./separation";
-import { transcribeToRawMidi } from "./transcribeStage";
+import { separatePianoStem, type SeparationResult } from "./separation";
+import { transcribeDualStems, transcribeToRawMidi } from "./transcribeStage";
 import { applyMidiIntelligence } from "./intelligence";
 
 const STAGE_RANGE: Record<PipelineStage, [number, number]> = {
@@ -29,14 +30,39 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Transcription cancelled.", "AbortError");
 }
 
-async function decodeAudioFile(file: File): Promise<AudioBuffer | null> {
-  if (typeof OfflineAudioContext === "undefined") return null;
+async function decodeStem(file: File, fallback: AudioBuffer): Promise<AudioBuffer> {
   try {
-    const ctx = new OfflineAudioContext(1, 1, 44100);
-    return await ctx.decodeAudioData(await file.arrayBuffer());
+    return await decodeAudioFile(file);
   } catch {
-    return null;
+    return fallback;
   }
+}
+
+/**
+ * Full songs: transcribe piano from the instrument stem and vocals from cleaner audio.
+ * Heuristic vocal stems are too noisy — use the original mix for the vocal pass instead.
+ */
+function shouldDualTranscribe(
+  target: NonNullable<PipelineOptions["target"]>,
+  profile: string,
+  separation: SeparationResult,
+): boolean {
+  return target === "both" && profile === "full_song" && separation.applied;
+}
+
+export function vocalSourceForTranscription(
+  target: NonNullable<PipelineOptions["target"]>,
+  separation: SeparationResult,
+  original: File,
+): File {
+  if (target !== "vocals") return original;
+  if (separation.backend === "demucs" && separation.vocalFile) return separation.vocalFile;
+  return original;
+}
+
+export function vocalSourceForDualPass(separation: SeparationResult, original: File): File {
+  if (separation.backend === "demucs" && separation.vocalFile) return separation.vocalFile;
+  return original;
 }
 
 /**
@@ -63,13 +89,12 @@ export async function runImportPipeline(
     report("preprocess", 100, "Audio analyzed", onProgress);
   }
 
-  let audioFile = file;
-  let audioBuffer = buffer;
-  let separationApplied = false;
+  const target = options.target ?? "both";
+  let separation: SeparationResult = { file, applied: false };
 
   if (options.enableSeparation !== false && analysis.profile === "full_song") {
     throwIfAborted(signal);
-    const sep = await separatePianoStem(
+    separation = await separatePianoStem(
       file,
       buffer,
       analysis,
@@ -78,26 +103,49 @@ export async function runImportPipeline(
       },
       signal,
     );
-    audioFile = sep.file;
-    separationApplied = sep.applied;
-    // Browser engines read the decoded buffer, not the file — decode the stem so they hear it too.
-    if (sep.applied && sep.file !== file) {
-      audioBuffer = (await decodeAudioFile(sep.file)) ?? buffer;
-    }
     throwIfAborted(signal);
   }
 
   report("transcribe", 0, "Detecting notes…", onProgress);
-  const raw = await transcribeToRawMidi(
-    audioFile,
-    audioBuffer,
-    options.target ?? "both",
-    (enginePct, label) => {
-      report("transcribe", enginePct, label ?? "Detecting notes…", onProgress);
-    },
-    signal,
-    options.engine ?? "auto",
-  );
+  let raw;
+  if (shouldDualTranscribe(target, analysis.profile, separation)) {
+    const pianoFile = separation.file;
+    const vocalFile = vocalSourceForDualPass(separation, file);
+    const [pianoBuffer, vocalBuffer] = await Promise.all([
+      decodeStem(pianoFile, buffer),
+      decodeStem(vocalFile, buffer),
+    ]);
+    raw = await transcribeDualStems(
+      { file: pianoFile, buffer: pianoBuffer },
+      { file: vocalFile, buffer: vocalBuffer },
+      (enginePct, label) => {
+        report("transcribe", enginePct, label ?? "Detecting notes…", onProgress);
+      },
+      signal,
+      options.engine ?? "auto",
+    );
+  } else {
+    let audioFile = file;
+    let transcribeBuffer = buffer;
+    if (target === "piano" && separation.applied) {
+      audioFile = separation.file;
+      transcribeBuffer = await decodeStem(audioFile, buffer);
+    } else if (target === "vocals") {
+      audioFile = vocalSourceForTranscription(target, separation, file);
+      if (audioFile !== file) transcribeBuffer = await decodeStem(audioFile, buffer);
+    }
+    // target "both" on full songs: always transcribe the full mix unless Demucs dual ran above.
+    raw = await transcribeToRawMidi(
+      audioFile,
+      transcribeBuffer,
+      target,
+      (enginePct, label) => {
+        report("transcribe", enginePct, label ?? "Detecting notes…", onProgress);
+      },
+      signal,
+      options.engine ?? "auto",
+    );
+  }
   throwIfAborted(signal);
 
   report("intelligence", 10, "Cleaning MIDI · removing artifacts…", onProgress);
@@ -114,7 +162,7 @@ export async function runImportPipeline(
     ...score,
     engine: raw.engine,
     analysis,
-    separationApplied,
+    separationApplied: separation.applied,
   };
 }
 

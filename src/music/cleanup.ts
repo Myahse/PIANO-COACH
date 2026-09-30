@@ -138,6 +138,49 @@ function collapsePitchFlutter(notes: TimedNote[]): TimedNote[] {
   return kept;
 }
 
+/** True when a short vocal hit is just transcriber noise inside a piano sustain. */
+function isNestedVocalBlip(vocal: TimedNote, piano: TimedNote): boolean {
+  if (piano.note !== vocal.note) return false;
+  const vEnd = vocal.start + vocal.duration;
+  const pEnd = piano.start + piano.duration;
+  return (
+    piano.start <= vocal.start + 0.02 &&
+    pEnd >= vEnd - 0.02 &&
+    piano.duration > vocal.duration * 2.5 &&
+    vocal.duration < 0.2
+  );
+}
+
+/** Same attack window — piano already covers this pitch; drop the shorter duplicate. */
+function isDuplicateAttack(vocal: TimedNote, piano: TimedNote): boolean {
+  if (piano.note !== vocal.note) return false;
+  if (Math.abs(piano.start - vocal.start) > 0.04) return false;
+  return vocal.duration < 0.18 && vocal.duration <= piano.duration * 0.55;
+}
+
+/**
+ * Hard / full score — keep piano chords AND vocal melody timing.
+ * Vocals stay as their own tiles; only drop obvious duplicates and nested blips.
+ */
+export function combineHardScore(voice: TimedNote[], inst: TimedNote[]): TimedNote[] {
+  const piano = inst.map((note) => ({ ...note }));
+  const keptVocals: TimedNote[] = [];
+
+  for (const vocal of voice) {
+    const redundant = piano.some(
+      (p) => isNestedVocalBlip(vocal, p) || isDuplicateAttack(vocal, p),
+    );
+    if (!redundant) keptVocals.push({ ...vocal });
+  }
+
+  return [...piano, ...keptVocals].sort((a, b) => a.start - b.start || a.note - b.note);
+}
+
+/** Medium — lighter merge before simplification (same rules as hard combine). */
+export function mergeScoreLayers(voice: TimedNote[], inst: TimedNote[]): TimedNote[] {
+  return combineHardScore(voice, inst);
+}
+
 /** Hard mode playback — trim floods, keep up to 10 chord tones per instant. */
 export function polishHardChords(notes: TimedNote[]): TimedNote[] {
   if (notes.length === 0) return [];

@@ -13,8 +13,8 @@ export function listTranscriptionEngines(): TranscriptionEngine[] {
 }
 
 /**
- * Pick engine: MuScriptor on desktop when available, else Transkun V2 (browser piano model)
- * for piano targets, else Basic Pitch. Vocal-only targets skip Transkun (piano-only model).
+ * Pick engine: MuScriptor when available (desktop or Vite dev server), else Transkun V2
+ * (browser piano model) for piano targets, else Basic Pitch. Vocal-only targets skip Transkun.
  */
 export async function selectTranscriptionEngine(
   preference: EnginePreference = "auto",

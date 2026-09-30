@@ -304,6 +304,12 @@ function runMuScriptorOneShot(inPath, target, onProgress) {
   });
 }
 
+function tempAudioPath(tmpDir, originalFilename) {
+  const ext = path.extname(originalFilename).replace(/^\./, "").toLowerCase();
+  const safeExt = /^(mp3|wav|flac|m4a|ogg|aac|wma|webm)$/.test(ext) ? ext : "mp3";
+  return path.join(tmpDir, `in-${Date.now()}.${safeExt}`);
+}
+
 async function runMuScriptor(inPath, target, onProgress) {
   // Only use the persistent worker once weights are cached — otherwise a worker
   // plus one-shot fallback both download the 5.5 GB file and stall for 30+ min.
@@ -374,7 +380,7 @@ export function muscriptorApiPlugin() {
           const target = url.searchParams.get("target") || "both";
           const tmp = path.join(os.tmpdir(), "piano-coach-muscriptor");
           await fs.mkdir(tmp, { recursive: true });
-          const inPath = path.join(tmp, `in-${Date.now()}-${filename}`);
+          const inPath = tempAudioPath(tmp, filename);
           await fs.writeFile(inPath, audio);
           res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
           res.setHeader("Cache-Control", "no-cache, no-transform");
