@@ -10,15 +10,15 @@ const TIME_SNAP = 0.05;
 const MIN_NOTE = 0.06;
 
 const COLORS = {
-  left: "#4a90d9",
-  right: "#e8a849",
-  voice: "#b07ce8",
-  neutral: "#f4efe6",
-  neutralDark: "#6aa8c8",
-  selected: "#ffffff",
-  playhead: "#ff6b6b",
-  wave: "rgba(244, 239, 230, 0.55)",
-  waveBg: "rgba(244, 239, 230, 0.06)",
+  left: "#0ea5e9",
+  right: "#6366f1",
+  voice: "#d946ef",
+  neutral: "#98a2b3",
+  neutralDark: "#667085",
+  selected: "#101828",
+  playhead: "#f04438",
+  wave: "rgba(79, 70, 229, 0.45)",
+  waveBg: "#f2f4f7",
 };
 
 type NoteRect = { index: number; x: number; y: number; w: number; h: number };
@@ -340,7 +340,7 @@ export class NoteEditor {
     const width = this.waveCanvas.clientWidth || 800;
     const height = WAVE_H;
     this.paintCanvas(this.waveCanvas, width, height, (ctx) => {
-      ctx.fillStyle = "#0d0b09";
+      ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, height);
       const left = LABEL_W;
       const innerW = width - left;
@@ -373,7 +373,7 @@ export class NoteEditor {
     const width = this.rollCanvas.clientWidth || 800;
     const height = this.rollHeight();
     this.paintCanvas(this.rollCanvas, width, height, (ctx) => {
-      ctx.fillStyle = "#100e0b";
+      ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, height);
 
       const gridTop = PAD;
@@ -383,24 +383,24 @@ export class NoteEditor {
 
       for (let pitch = this.minPitch; pitch <= this.maxPitch; pitch++) {
         const y = this.pitchY(pitch, gridTop, gridHeight);
-        ctx.fillStyle = isBlackKey(pitch) ? "rgba(255,255,255,0.035)" : "rgba(255,255,255,0.018)";
+        ctx.fillStyle = isBlackKey(pitch) ? "#f2f4f7" : "#ffffff";
         ctx.fillRect(gridLeft, y - ROW / 2, width - gridLeft, ROW);
         if (pitch % 12 === 0) {
-          ctx.strokeStyle = "rgba(244, 239, 230, 0.07)";
+          ctx.strokeStyle = "#e4e7ec";
           ctx.beginPath();
           ctx.moveTo(gridLeft, y);
           ctx.lineTo(width, y);
           ctx.stroke();
         }
-        ctx.fillStyle = "rgba(180, 168, 150, 0.7)";
-        ctx.font = "500 10px Manrope, sans-serif";
+        ctx.fillStyle = "#98a2b3";
+        ctx.font = "500 10px Inter, sans-serif";
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
         ctx.fillText(noteLabel(pitch), gridLeft - 6, y);
       }
 
       const beatStep = this.pps >= 150 ? 0.5 : 1;
-      ctx.strokeStyle = "rgba(244, 239, 230, 0.05)";
+      ctx.strokeStyle = "#eaecf0";
       for (let t = 0; t <= this.duration + 1; t += beatStep) {
         const x = gridLeft + t * this.pps - this.scrollX;
         if (x < gridLeft || x > width) continue;
@@ -430,7 +430,7 @@ export class NoteEditor {
         ctx.fill();
         ctx.globalAlpha = 1;
         if (selected) {
-          ctx.strokeStyle = "#fff";
+          ctx.strokeStyle = "#4f46e5";
           ctx.lineWidth = 2;
           roundRect(ctx, x, y - h / 2 + 1, w, h - 2, 4);
           ctx.stroke();

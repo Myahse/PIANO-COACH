@@ -93,7 +93,7 @@ export class PianoRoll {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const hitY = height - 3;
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#100e0b";
+    ctx.fillStyle = "#f8f9fb";
     ctx.fillRect(0, 0, width, height);
 
     const pixelsPerSecond = (hitY - 16) / LOOKAHEAD;
@@ -104,9 +104,9 @@ export class PianoRoll {
     const pianoWidth = pianoEl?.clientWidth ?? width;
     const layout = pianoWidth > 0 ? this.piano.virtualLayout(pianoWidth) : new Map();
 
-    ctx.fillStyle = "rgba(232, 184, 109, 0.16)";
+    ctx.fillStyle = "rgba(79, 70, 229, 0.08)";
     ctx.fillRect(0, hitY - 7, width, 14);
-    ctx.strokeStyle = "rgba(232, 184, 109, 0.85)";
+    ctx.strokeStyle = "#4f46e5";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(0, hitY);
@@ -120,8 +120,8 @@ export class PianoRoll {
     drawOctaveGuides(ctx, layout, shiftX, hitY, width);
 
     if (time < 0) {
-      ctx.fillStyle = "#e8b86d";
-      ctx.font = "600 18px Manrope, sans-serif";
+      ctx.fillStyle = "#4f46e5";
+      ctx.font = "700 20px Inter, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(String(Math.max(1, Math.ceil(-time))), width / 2, 36);
     }
@@ -169,11 +169,11 @@ export class PianoRoll {
       const drawX = x + shiftX - tileW / 2;
       if (drawX + tileW < -8 || drawX > width + 8) continue;
       const rightHand = note.note >= 60;
-      const handBase = rightHand ? "#e8b86d" : "#4a90d9";
-      const handActive = rightHand ? "#f5d08a" : "#7eb6d6";
+      const handBase = rightHand ? "#6366f1" : "#0ea5e9";
+      const handActive = rightHand ? "#818cf8" : "#38bdf8";
       ctx.globalAlpha = off ? 0.28 : 1;
       ctx.fillStyle = done
-        ? "rgba(143, 206, 122, 0.82)"
+        ? "rgba(18, 183, 106, 0.85)"
         : active
           ? handActive
           : handBase;
@@ -184,10 +184,10 @@ export class PianoRoll {
     ctx.restore();
 
     if (time < -COUNT_IN + 0.05) {
-      ctx.fillStyle = "rgba(244, 239, 230, 0.45)";
-      ctx.font = "500 13px Manrope, sans-serif";
+      ctx.fillStyle = "#98a2b3";
+      ctx.font = "500 13px Inter, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("Notes fall to the gold line with the song", width / 2, height / 2);
+      ctx.fillText("Notes fall to the line in time with the song", width / 2, height / 2);
     }
   }
 }
@@ -203,14 +203,14 @@ function drawOctaveGuides(
     if (midi % 12 !== 0) continue;
     const x = slot.x + shiftX;
     if (x < -24 || x > canvasWidth + 24) continue;
-    ctx.strokeStyle = "rgba(232, 184, 109, 0.22)";
+    ctx.strokeStyle = "rgba(16, 24, 40, 0.07)";
     ctx.lineWidth = midi === 60 ? 2 : 1;
     ctx.beginPath();
     ctx.moveTo(x, 8);
     ctx.lineTo(x, hitY);
     ctx.stroke();
-    ctx.fillStyle = "rgba(232, 184, 109, 0.55)";
-    ctx.font = "600 10px Manrope, sans-serif";
+    ctx.fillStyle = "#98a2b3";
+    ctx.font = "600 10px Inter, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(`C${octave(midi)}`, x, 10);

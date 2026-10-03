@@ -119,6 +119,9 @@ export function mountApp(host: HTMLElement): void {
   let saved: Piece[] = [];
   let raf = 0;
 
+  const navIcon = (paths: string): string =>
+    `<svg class="ss-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+
   host.innerHTML = `
     <div class="app ss-app">
       <aside class="ss-sidebar">
@@ -131,11 +134,11 @@ export function mountApp(host: HTMLElement): void {
         <button type="button" class="primary ss-new" data-new-import>+ New song</button>
         <input type="file" class="hidden" accept=".mid,.midi,.musicxml,.mxl,.xml,.mp3,.wav,.ogg,.m4a,audio/*,audio/midi" data-import />
         <nav class="ss-nav" aria-label="Main">
-          <button type="button" class="ss-nav-item active" data-mode="live">Play</button>
-          <button type="button" class="ss-nav-item" data-mode="library">My songs</button>
-          <button type="button" class="ss-nav-item" data-mode="learn">Course</button>
-          <button type="button" class="ss-nav-item" data-mode="read">Read</button>
-          <button type="button" class="ss-nav-item" data-mode="free">Free play</button>
+          <button type="button" class="ss-nav-item active" data-mode="live">${navIcon(`<path d="M8 5v14l11-7z"/>`)}<span>Play</span></button>
+          <button type="button" class="ss-nav-item" data-mode="library">${navIcon(`<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>`)}<span>My songs</span></button>
+          <button type="button" class="ss-nav-item" data-mode="learn">${navIcon(`<path d="M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/>`)}<span>Course</span></button>
+          <button type="button" class="ss-nav-item" data-mode="read">${navIcon(`<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5V21h16"/>`)}<span>Read</span></button>
+          <button type="button" class="ss-nav-item" data-mode="free">${navIcon(`<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M7 6v7M12 6v7M17 6v7"/>`)}<span>Free play</span></button>
         </nav>
         <div class="ss-recents">
           <p class="ss-recents-label">Recent</p>
@@ -221,13 +224,16 @@ export function mountApp(host: HTMLElement): void {
         <div class="library-head">
           <div>
             <h2>Your library</h2>
-            <p>Songs you transcribed. Import new ones from the <strong>Play</strong> tab.</p>
+            <p>Songs you've imported. Add a recording or a MIDI / MusicXML file below.</p>
           </div>
           <button type="button" class="ghost danger" data-library-empty hidden>Empty library</button>
         </div>
-        <label class="file-pick import-box library-import" data-library-import-box>
-          Drop a file here, or use the Play tab
-          <input type="file" accept=".mid,.midi,.musicxml,.mxl,.xml,.mp3,.wav,.ogg,.m4a,audio/*,audio/midi" data-library-import />
+        <label class="file-pick import-box library-import dropzone" data-library-import-box>
+          <span class="dropzone-icon" aria-hidden="true">♪</span>
+          <strong>Drop a song here</strong>
+          <span class="dropzone-hint">MP3, WAV, MIDI or MusicXML · we'll turn recordings into notes</span>
+          <span class="primary dropzone-btn">Choose a file</span>
+          <input type="file" class="sr-only" accept=".mid,.midi,.musicxml,.mxl,.xml,.mp3,.wav,.ogg,.m4a,audio/*,audio/midi" data-library-import />
         </label>
         <div class="import-progress hidden" data-library-progress><i data-library-bar></i></div>
         <p class="hint" data-library-status>Nothing imported yet.</p>
@@ -249,9 +255,10 @@ export function mountApp(host: HTMLElement): void {
           </div>
         </header>
         <div class="ss-settings-panel hidden" data-settings-panel>
-          <label class="file-pick import-box live-import" data-import-box>
-            Drop MP3, MIDI, or MusicXML
-            <input type="file" accept=".mid,.midi,.musicxml,.mxl,.xml,.mp3,.wav,.ogg,.m4a,audio/*,audio/midi" data-import-secondary />
+          <label class="file-pick import-box live-import dropzone" data-import-box>
+            <strong>Drop MP3, MIDI or MusicXML</strong>
+            <span class="dropzone-hint">or click to choose a file</span>
+            <input type="file" class="sr-only" accept=".mid,.midi,.musicxml,.mxl,.xml,.mp3,.wav,.ogg,.m4a,audio/*,audio/midi" data-import-secondary />
           </label>
           <div class="import-progress hidden" data-import-progress><i data-import-bar></i></div>
           <p class="hint" data-import-status>Drop a song to transcribe it.</p>
@@ -310,6 +317,12 @@ export function mountApp(host: HTMLElement): void {
           <button type="button" class="chip active" data-play-view="play">Play</button>
         </div>
         <div class="ss-workspace piano-dock" data-workspace>
+          <div class="play-empty" data-play-empty hidden>
+            <span class="dropzone-icon" aria-hidden="true">♪</span>
+            <h3>No song yet</h3>
+            <p>Import a recording or MIDI file and Piano Coach turns it into falling notes and sheet music you can play along with.</p>
+            <button type="button" class="primary" data-empty-import>Import a song</button>
+          </div>
           <div class="play-stage" data-play-stage>
             <div class="play-main" data-play-main>
               <aside class="sheet-window" data-sheet-window>
@@ -588,6 +601,11 @@ export function mountApp(host: HTMLElement): void {
   const settingsPanel = $<HTMLElement>("[data-settings-panel]");
   const settingsToggle = $<HTMLButtonElement>("[data-settings-toggle]");
   const newImportBtn = $<HTMLButtonElement>("[data-new-import]");
+  const playEmpty = $<HTMLElement>("[data-play-empty]");
+  const setPlayEmpty = (empty: boolean): void => {
+    playEmpty.hidden = !empty;
+    workspace?.classList.toggle("is-empty", empty);
+  };
   const importSecondary = $<HTMLInputElement>("[data-import-secondary]");
   const hearSongToggle = $<HTMLInputElement>("[data-hear-song]");
   const hearSongTransport = $<HTMLInputElement>("[data-hear-song-transport]");
@@ -848,6 +866,7 @@ export function mountApp(host: HTMLElement): void {
   };
 
   const loadSelectedPiece = (): void => {
+    setPlayEmpty(saved.length === 0);
     if (saved.length === 0) {
       live.load("Import a song", [], undefined);
       liveTitle.textContent = "Import a song";
@@ -2152,6 +2171,8 @@ export function mountApp(host: HTMLElement): void {
   };
 
   importDismiss.addEventListener("click", () => closeImportOverlay());
+
+  $<HTMLButtonElement>("[data-empty-import]").addEventListener("click", () => newImportBtn.click());
 
   newImportBtn.addEventListener("click", () => {
     settingsPanel.classList.add("hidden");

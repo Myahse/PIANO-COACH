@@ -107,11 +107,10 @@ export function notationHeaderMarkup(
   const { sharps, flats } = keyAccidentalCount(interpreted.key);
   const sig =
     sharps > 0 ? `${"♯".repeat(Math.min(sharps, 7))}` : flats > 0 ? `${"♭".repeat(Math.min(flats, 7))}` : "♮";
-  const y = trebleY - gap * 5.2;
+  // One line above the top staff line, clear of the clef and noteheads.
+  const y = trebleY - gap * 4 - 7;
   return `
-    <text class="score-key" x="46" y="${y}">${interpreted.key.label}</text>
-    <text class="score-sig" x="46" y="${y + 14}">${sig}</text>
-    <text class="score-tempo" x="46" y="${y + 28}">♩ = ${interpreted.bpm}</text>
+    <text class="score-header" x="46" y="${y}"><tspan class="score-key">${interpreted.key.label}</tspan><tspan class="score-sig" dx="8">${sig}</tspan><tspan class="score-tempo" dx="8">♩ = ${interpreted.bpm}</tspan></text>
   `;
 }
 
