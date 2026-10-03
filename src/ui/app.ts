@@ -1,6 +1,5 @@
 import { audioBufferToWavFile } from "../audio/wavFile";
 import { icon, starIcons, type IconName } from "./icons";
-import { setThemePreference, themePreference, type ThemePreference } from "./theme";
 import { Metronome } from "../audio/metronome";
 import { PianoSynth } from "../audio/pianoSynth";
 import {
@@ -154,11 +153,6 @@ export function mountApp(host: HTMLElement): void {
             <div class="midi-status compact" data-midi-status>
               <span class="dot"></span>
               <span data-midi-label>MIDI</span>
-            </div>
-            <div class="theme-switch" role="group" aria-label="Theme" data-theme-switch>
-              <button type="button" data-theme-option="light" aria-label="Light theme" title="Light">${icon("sun")}</button>
-              <button type="button" data-theme-option="dark" aria-label="Dark theme" title="Dark">${icon("moon")}</button>
-              <button type="button" data-theme-option="system" aria-label="Match system theme" title="System">${icon("monitor")}</button>
             </div>
             <button type="button" class="chip" data-sound>Sound</button>
           </div>
@@ -605,20 +599,6 @@ export function mountApp(host: HTMLElement): void {
   const settingsPanel = $<HTMLElement>("[data-settings-panel]");
   const settingsToggle = $<HTMLButtonElement>("[data-settings-toggle]");
   const newImportBtn = $<HTMLButtonElement>("[data-new-import]");
-  const themeButtons = Array.from(host.querySelectorAll<HTMLButtonElement>("[data-theme-option]"));
-  const syncThemeButtons = (): void => {
-    const current = themePreference();
-    for (const button of themeButtons) {
-      button.setAttribute("aria-pressed", String(button.dataset.themeOption === current));
-    }
-  };
-  for (const button of themeButtons) {
-    button.addEventListener("click", () => {
-      setThemePreference(button.dataset.themeOption as ThemePreference);
-      syncThemeButtons();
-    });
-  }
-  syncThemeButtons();
   const playEmpty = $<HTMLElement>("[data-play-empty]");
   const setPlayEmpty = (empty: boolean): void => {
     playEmpty.hidden = !empty;
