@@ -1,4 +1,6 @@
 import { audioBufferToWavFile } from "../audio/wavFile";
+import { icon, starIcons, type IconName } from "./icons";
+import { setThemePreference, themePreference, type ThemePreference } from "./theme";
 import { Metronome } from "../audio/metronome";
 import { PianoSynth } from "../audio/pianoSynth";
 import {
@@ -60,7 +62,7 @@ import { PianoView } from "./piano";
 type Mode = "learn" | "read" | "live" | "library" | "free";
 
 function starText(stars: Stars | number): string {
-  return "★★★".slice(0, stars) + "☆☆☆".slice(stars);
+  return starIcons(Number(stars));
 }
 
 function formatTime(seconds: number): string {
@@ -119,9 +121,6 @@ export function mountApp(host: HTMLElement): void {
   let saved: Piece[] = [];
   let raf = 0;
 
-  const navIcon = (paths: string): string =>
-    `<svg class="ss-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-
   host.innerHTML = `
     <div class="app ss-app">
       <aside class="ss-sidebar">
@@ -134,11 +133,11 @@ export function mountApp(host: HTMLElement): void {
         <button type="button" class="primary ss-new" data-new-import>+ New song</button>
         <input type="file" class="hidden" accept=".mid,.midi,.musicxml,.mxl,.xml,.mp3,.wav,.ogg,.m4a,audio/*,audio/midi" data-import />
         <nav class="ss-nav" aria-label="Main">
-          <button type="button" class="ss-nav-item active" data-mode="live">${navIcon(`<path d="M8 5v14l11-7z"/>`)}<span>Play</span></button>
-          <button type="button" class="ss-nav-item" data-mode="library">${navIcon(`<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>`)}<span>My songs</span></button>
-          <button type="button" class="ss-nav-item" data-mode="learn">${navIcon(`<path d="M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/>`)}<span>Course</span></button>
-          <button type="button" class="ss-nav-item" data-mode="read">${navIcon(`<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5V21h16"/>`)}<span>Read</span></button>
-          <button type="button" class="ss-nav-item" data-mode="free">${navIcon(`<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M7 6v7M12 6v7M17 6v7"/>`)}<span>Free play</span></button>
+          <button type="button" class="ss-nav-item active" data-mode="live">${icon("play", "ss-nav-icon")}<span>Play</span></button>
+          <button type="button" class="ss-nav-item" data-mode="library">${icon("music", "ss-nav-icon")}<span>My songs</span></button>
+          <button type="button" class="ss-nav-item" data-mode="learn">${icon("course", "ss-nav-icon")}<span>Course</span></button>
+          <button type="button" class="ss-nav-item" data-mode="read">${icon("book", "ss-nav-icon")}<span>Read</span></button>
+          <button type="button" class="ss-nav-item" data-mode="free">${icon("keyboard", "ss-nav-icon")}<span>Free play</span></button>
         </nav>
         <div class="ss-recents">
           <p class="ss-recents-label">Recent</p>
@@ -155,6 +154,11 @@ export function mountApp(host: HTMLElement): void {
             <div class="midi-status compact" data-midi-status>
               <span class="dot"></span>
               <span data-midi-label>MIDI</span>
+            </div>
+            <div class="theme-switch" role="group" aria-label="Theme" data-theme-switch>
+              <button type="button" data-theme-option="light" aria-label="Light theme" title="Light">${icon("sun")}</button>
+              <button type="button" data-theme-option="dark" aria-label="Dark theme" title="Dark">${icon("moon")}</button>
+              <button type="button" data-theme-option="system" aria-label="Match system theme" title="System">${icon("monitor")}</button>
             </div>
             <button type="button" class="chip" data-sound>Sound</button>
           </div>
@@ -229,7 +233,7 @@ export function mountApp(host: HTMLElement): void {
           <button type="button" class="ghost danger" data-library-empty hidden>Empty library</button>
         </div>
         <label class="file-pick import-box library-import dropzone" data-library-import-box>
-          <span class="dropzone-icon" aria-hidden="true">♪</span>
+          <span class="dropzone-icon" aria-hidden="true">${icon("upload")}</span>
           <strong>Drop a song here</strong>
           <span class="dropzone-hint">MP3, WAV, MIDI or MusicXML · we'll turn recordings into notes</span>
           <span class="primary dropzone-btn">Choose a file</span>
@@ -318,7 +322,7 @@ export function mountApp(host: HTMLElement): void {
         </div>
         <div class="ss-workspace piano-dock" data-workspace>
           <div class="play-empty" data-play-empty hidden>
-            <span class="dropzone-icon" aria-hidden="true">♪</span>
+            <span class="dropzone-icon" aria-hidden="true">${icon("upload")}</span>
             <h3>No song yet</h3>
             <p>Import a recording or MIDI file and Piano Coach turns it into falling notes and sheet music you can play along with.</p>
             <button type="button" class="primary" data-empty-import>Import a song</button>
@@ -353,10 +357,10 @@ export function mountApp(host: HTMLElement): void {
           </div>
           <div class="ss-transport-center">
             <button type="button" class="ghost ss-transport-btn" data-live-back aria-label="Back 5 seconds">−5s</button>
-            <button type="button" class="ghost ss-transport-btn" data-live-prev aria-label="Previous note">◀</button>
+            <button type="button" class="ghost ss-transport-btn" data-live-prev aria-label="Previous note">${icon("skipBack")}</button>
             <button type="button" class="ghost ss-transport-btn" data-live-stop>Stop</button>
             <button type="button" class="primary ss-play-btn" data-live-play>Play</button>
-            <button type="button" class="ghost ss-transport-btn" data-live-next aria-label="Next note">▶</button>
+            <button type="button" class="ghost ss-transport-btn" data-live-next aria-label="Next note">${icon("skipForward")}</button>
             <button type="button" class="ghost ss-transport-btn" data-live-forward aria-label="Forward 5 seconds">+5s</button>
             <input type="range" class="ss-seek" data-live-seek min="0" max="100" value="0" step="0.05" aria-label="Song position" />
             <span class="ss-time" data-live-time>0:00 / 0:00</span>
@@ -601,6 +605,20 @@ export function mountApp(host: HTMLElement): void {
   const settingsPanel = $<HTMLElement>("[data-settings-panel]");
   const settingsToggle = $<HTMLButtonElement>("[data-settings-toggle]");
   const newImportBtn = $<HTMLButtonElement>("[data-new-import]");
+  const themeButtons = Array.from(host.querySelectorAll<HTMLButtonElement>("[data-theme-option]"));
+  const syncThemeButtons = (): void => {
+    const current = themePreference();
+    for (const button of themeButtons) {
+      button.setAttribute("aria-pressed", String(button.dataset.themeOption === current));
+    }
+  };
+  for (const button of themeButtons) {
+    button.addEventListener("click", () => {
+      setThemePreference(button.dataset.themeOption as ThemePreference);
+      syncThemeButtons();
+    });
+  }
+  syncThemeButtons();
   const playEmpty = $<HTMLElement>("[data-play-empty]");
   const setPlayEmpty = (empty: boolean): void => {
     playEmpty.hidden = !empty;
@@ -962,12 +980,12 @@ export function mountApp(host: HTMLElement): void {
     target.innerHTML = `
       <div class="game-bar">
         <div class="game-stat flame ${game.streak > 0 ? "hot" : ""}">
-          <span aria-hidden="true">🔥</span>
+          ${icon("flame", "icon stat-icon")}
           <strong>${game.streak}</strong>
           <em>day streak</em>
         </div>
         <div class="game-stat xp">
-          <span aria-hidden="true">⚡</span>
+          ${icon("zap", "icon stat-icon")}
           <strong>${game.xp}</strong>
           <em>XP</em>
         </div>
@@ -1023,7 +1041,7 @@ export function mountApp(host: HTMLElement): void {
                     const number = levels.indexOf(level) + 1;
                     const lane = lanes[step % lanes.length];
                     const tag = handShort(level.hand);
-                    const icon = !unlocked ? "🔒" : done ? (stars >= 3 ? "★" : "✓") : "♪";
+                    const nodeIcon: IconName = !unlocked ? "lock" : done ? (stars >= 3 ? "star" : "check") : "note";
                     const state = !unlocked ? "locked" : current ? "current" : done ? "done" : "open";
                     return `
                       <div class="trail-node lane-${lane} ${state}" data-lane="${lane}">
@@ -1037,16 +1055,16 @@ export function mountApp(host: HTMLElement): void {
                           </div>
                         ` : ""}
                         <button type="button" class="node" data-level="${level.id}" ${unlocked ? "" : "disabled"} aria-label="${escapeHtml(level.title)}">
-                          <span>${icon}</span>
+                          ${icon(nodeIcon, "icon node-icon")}
                           <small>${number}</small>
                         </button>
-                        <p class="node-stars">${done ? starText(stars) : unlocked ? "•••" : ""}</p>
+                        <p class="node-stars">${done ? starText(stars) : ""}</p>
                       </div>
                     `;
                   })
                   .join("")}
                 <div class="trail-node lane-1 chest ${unitCleared ? "open" : "shut"}">
-                  <div class="node chest-node" aria-hidden="true"><span>${unitCleared ? "🏆" : "🎁"}</span></div>
+                  <div class="node chest-node" aria-hidden="true">${icon(unitCleared ? "trophy" : "gift", "icon node-icon")}</div>
                   <p class="node-stars">${unitCleared ? "Unit clear" : "Clear the unit"}</p>
                 </div>
               </div>
@@ -1223,9 +1241,8 @@ export function mountApp(host: HTMLElement): void {
       : state.expected;
     const inPlayLesson = inLesson && state.playMode && !state.complete;
     bigNote.classList.toggle("hidden", inPlayLesson);
-    bigNote.textContent = state.complete
-      ? starText(state.stars)
-      : state.screen === "free"
+    if (state.complete) bigNote.innerHTML = `<span class="star-row">${starText(state.stars)}</span>`;
+    else bigNote.textContent = state.screen === "free"
         ? "Play"
         : shown.length === 0
           ? "—"
@@ -1303,7 +1320,8 @@ export function mountApp(host: HTMLElement): void {
     titleEl.textContent = state.title;
     skillEl.textContent = state.skill;
     promptEl.textContent = state.prompt;
-    bigNote.textContent = state.complete ? starText(state.stars) : state.showName && state.expected[0] !== undefined ? prettyName(state.expected[0]) : " ";
+    if (state.complete) bigNote.innerHTML = `<span class="star-row">${starText(state.stars)}</span>`;
+    else bigNote.textContent = state.showName && state.expected[0] !== undefined ? prettyName(state.expected[0]) : " ";
     progressEl.textContent = `${Math.min(state.correct, state.goal)}/${state.goal}`;
     progressLabel.textContent = "cleared";
     streakEl.textContent = String(state.streak);
@@ -1469,6 +1487,11 @@ export function mountApp(host: HTMLElement): void {
     livePlay.textContent = "Play";
     piano.clearHighlights();
   };
+
+  // Canvas colours come from theme tokens — repaint the falling notes when the theme flips.
+  window.addEventListener("themechange", () => {
+    if (mode === "live") renderLiveHud();
+  });
 
   const loopLive = (): void => {
     live.tickWait();
@@ -1899,7 +1922,7 @@ export function mountApp(host: HTMLElement): void {
     modelSetupSteps.innerHTML = state.steps
       .map(
         (step) =>
-          `<li class="${step.done ? "done" : "pending"}"><strong>${step.done ? "✓" : "○"}</strong> ${step.label}${
+          `<li class="${step.done ? "done" : "pending"}">${icon(step.done ? "circleCheck" : "circle", "icon step-icon")} ${step.label}${
             step.action && !step.done ? `<em>${step.action}</em>` : ""
           }</li>`,
       )

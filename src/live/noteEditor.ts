@@ -1,3 +1,5 @@
+import { icon } from "../ui/icons";
+import { themeColor } from "../ui/theme";
 import { buildWaveformPeaks } from "../audio/waveform";
 import { FIRST_MIDI, isBlackKey, LAST_MIDI, noteLabel } from "../music/notes";
 import { playDuration, type TimedNote } from "../music/timed";
@@ -15,10 +17,8 @@ const COLORS = {
   voice: "#d946ef",
   neutral: "#98a2b3",
   neutralDark: "#667085",
-  selected: "#101828",
   playhead: "#f04438",
-  wave: "rgba(79, 70, 229, 0.45)",
-  waveBg: "#f2f4f7",
+  wave: "rgba(109, 111, 245, 0.5)",
 };
 
 type NoteRect = { index: number; x: number; y: number; w: number; h: number };
@@ -57,7 +57,7 @@ export class NoteEditor {
     this.root.className = "ss-editor hidden";
     this.root.innerHTML = `
       <div class="ss-transport">
-        <button type="button" class="ss-play primary" data-editor-play aria-label="Play">▶</button>
+        <button type="button" class="ss-play primary" data-editor-play aria-label="Play">${icon("play")}</button>
         <span class="ss-time" data-editor-time>0:00 / 0:00</span>
         <div class="ss-transport-gap"></div>
         <button type="button" class="ghost" data-editor-delete>Delete note</button>
@@ -85,6 +85,7 @@ export class NoteEditor {
     this.bindToolbar();
     this.bindCanvas();
     this.resizeObserver = new ResizeObserver(() => this.redraw());
+    window.addEventListener("themechange", () => this.redraw());
     this.resizeObserver.observe(this.rollCanvas);
     if (this.rollCanvas.parentElement) this.resizeObserver.observe(this.rollCanvas.parentElement);
   }
@@ -117,7 +118,7 @@ export class NoteEditor {
     this.dirty = false;
     this.dragIndex = -1;
     this.playhead = 0;
-    this.playBtn.textContent = "▶";
+    this.playBtn.innerHTML = icon("play");
 
     this.leftHand = new Set((layers?.left ?? []).map((n) => noteKey(n)));
     this.rightHand = new Set((layers?.right ?? []).map((n) => noteKey(n)));
@@ -150,7 +151,8 @@ export class NoteEditor {
 
   setPlayhead(time: number, playing: boolean): void {
     this.playhead = Math.max(0, time);
-    this.playBtn.textContent = playing ? "⏸" : "▶";
+    this.playBtn.innerHTML = icon(playing ? "pause" : "play");
+    this.playBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
     this.updateTimeLabel();
     this.redraw();
   }
@@ -340,11 +342,11 @@ export class NoteEditor {
     const width = this.waveCanvas.clientWidth || 800;
     const height = WAVE_H;
     this.paintCanvas(this.waveCanvas, width, height, (ctx) => {
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = themeColor("--surface", "#ffffff");
       ctx.fillRect(0, 0, width, height);
       const left = LABEL_W;
       const innerW = width - left;
-      ctx.fillStyle = COLORS.waveBg;
+      ctx.fillStyle = themeColor("--surface-2", "#f2f4f7");
       ctx.fillRect(left, 4, innerW, height - 8);
 
       if (this.peaks && this.audio) {
@@ -373,7 +375,7 @@ export class NoteEditor {
     const width = this.rollCanvas.clientWidth || 800;
     const height = this.rollHeight();
     this.paintCanvas(this.rollCanvas, width, height, (ctx) => {
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = themeColor("--surface", "#ffffff");
       ctx.fillRect(0, 0, width, height);
 
       const gridTop = PAD;
@@ -383,16 +385,16 @@ export class NoteEditor {
 
       for (let pitch = this.minPitch; pitch <= this.maxPitch; pitch++) {
         const y = this.pitchY(pitch, gridTop, gridHeight);
-        ctx.fillStyle = isBlackKey(pitch) ? "#f2f4f7" : "#ffffff";
+        ctx.fillStyle = isBlackKey(pitch) ? themeColor("--surface-2", "#f2f4f7") : themeColor("--surface", "#ffffff");
         ctx.fillRect(gridLeft, y - ROW / 2, width - gridLeft, ROW);
         if (pitch % 12 === 0) {
-          ctx.strokeStyle = "#e4e7ec";
+          ctx.strokeStyle = themeColor("--line", "#e4e7ec");
           ctx.beginPath();
           ctx.moveTo(gridLeft, y);
           ctx.lineTo(width, y);
           ctx.stroke();
         }
-        ctx.fillStyle = "#98a2b3";
+        ctx.fillStyle = themeColor("--muted", "#98a2b3");
         ctx.font = "500 10px Inter, sans-serif";
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
@@ -400,7 +402,7 @@ export class NoteEditor {
       }
 
       const beatStep = this.pps >= 150 ? 0.5 : 1;
-      ctx.strokeStyle = "#eaecf0";
+      ctx.strokeStyle = themeColor("--line", "#eaecf0");
       for (let t = 0; t <= this.duration + 1; t += beatStep) {
         const x = gridLeft + t * this.pps - this.scrollX;
         if (x < gridLeft || x > width) continue;
@@ -415,7 +417,7 @@ export class NoteEditor {
         const selected = this.selected.has(index);
         const kind = this.noteKind(note);
         ctx.fillStyle = selected
-          ? COLORS.selected
+          ? themeColor("--ink", "#101828")
           : kind === "left"
             ? COLORS.left
             : kind === "right"
@@ -430,7 +432,7 @@ export class NoteEditor {
         ctx.fill();
         ctx.globalAlpha = 1;
         if (selected) {
-          ctx.strokeStyle = "#4f46e5";
+          ctx.strokeStyle = themeColor("--accent", "#4f46e5");
           ctx.lineWidth = 2;
           roundRect(ctx, x, y - h / 2 + 1, w, h - 2, 4);
           ctx.stroke();

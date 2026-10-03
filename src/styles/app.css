@@ -43,6 +43,154 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* —— Dark theme: follows the system unless the user picked Light/Dark —— */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --bg: #0c0e13;
+  --surface: #151820;
+  --surface-2: #1b1f29;
+  --surface-3: #252a36;
+  --stage: #101319;
+  --line: #262b37;
+  --line-strong: #363c4b;
+  --ink: #f2f4f7;
+  --ink-2: #d0d5dd;
+  --muted: #98a2b3;
+  --accent: #6d6ff5;
+  --accent-hover: #8587ff;
+  --accent-soft: #23244a;
+  --accent-ink: #c7caff;
+  --correct: #32d583;
+  --correct-soft: #0f2a1f;
+  --correct-ink: #75e0a7;
+  --wrong: #f97066;
+  --wrong-soft: #2d1614;
+  --wrong-ink: #fda29b;
+  --played: #53b1fd;
+  --streak: #fdb022;
+  --white-key: #e9ecf1;
+  --white-ink: #475467;
+  --black-key: #0c0e13;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0c0e13;
+  --surface: #151820;
+  --surface-2: #1b1f29;
+  --surface-3: #252a36;
+  --stage: #101319;
+  --line: #262b37;
+  --line-strong: #363c4b;
+  --ink: #f2f4f7;
+  --ink-2: #d0d5dd;
+  --muted: #98a2b3;
+  --accent: #6d6ff5;
+  --accent-hover: #8587ff;
+  --accent-soft: #23244a;
+  --accent-ink: #c7caff;
+  --correct: #32d583;
+  --correct-soft: #0f2a1f;
+  --correct-ink: #75e0a7;
+  --wrong: #f97066;
+  --wrong-soft: #2d1614;
+  --wrong-ink: #fda29b;
+  --played: #53b1fd;
+  --streak: #fdb022;
+  --white-key: #e9ecf1;
+  --white-ink: #475467;
+  --black-key: #0c0e13;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* Tinted unit cards adapt to whichever surface they sit on. */
+:root[data-theme="dark"] .unit-banner {
+  background: color-mix(in srgb, var(--tone-ink, var(--accent)) 16%, var(--surface));
+  border-color: color-mix(in srgb, var(--tone-ink, var(--accent)) 35%, var(--surface));
+}
+:root[data-theme="dark"] .unit-banner > p:first-child {
+  color: color-mix(in srgb, var(--tone-ink, var(--accent)) 45%, #fff);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .unit-banner {
+    background: color-mix(in srgb, var(--tone-ink, var(--accent)) 16%, var(--surface));
+    border-color: color-mix(in srgb, var(--tone-ink, var(--accent)) 35%, var(--surface));
+  }
+  :root:not([data-theme="light"]) .unit-banner > p:first-child {
+    color: color-mix(in srgb, var(--tone-ink, var(--accent)) 45%, #fff);
+  }
+}
+
+/* —— Icons —— */
+.icon {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+}
+
+.node .node-icon { width: 26px; height: 26px; }
+.chest-node .node-icon { width: 24px; height: 24px; }
+.trail-node.done .node .node-icon,
+.trail-node.current .node .node-icon { color: #fff; }
+
+.stat-icon { width: 15px; height: 15px; align-self: center; color: var(--muted); }
+.game-stat.flame .stat-icon { color: var(--streak); }
+.game-stat.hot .stat-icon { fill: color-mix(in srgb, var(--streak) 30%, transparent); }
+.game-stat.xp .stat-icon { color: var(--accent); }
+
+.star-on { color: #f5b400; }
+.star-off { color: var(--line-strong); fill: none; }
+.node-stars { display: flex; gap: 2px; justify-content: center; align-items: center; }
+.node-stars .icon { width: 14px; height: 14px; }
+.star-row { display: inline-flex; gap: 6px; }
+.star-row .icon { width: 0.8em; height: 0.8em; }
+
+.step-icon { width: 15px; height: 15px; vertical-align: -3px; margin-right: 4px; color: var(--muted); }
+.model-setup-steps li.done .step-icon { color: var(--correct); }
+.model-setup-steps { list-style: none; padding-left: 0; }
+
+.dropzone-icon .icon { width: 22px; height: 22px; }
+.ss-transport-btn .icon, .ss-play .icon { width: 16px; height: 16px; vertical-align: -3px; }
+
+/* —— Theme switcher —— */
+.theme-switch {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.theme-switch button {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.theme-switch button:hover { color: var(--ink); }
+
+.theme-switch button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.theme-switch .icon { width: 16px; height: 16px; }
+
+
 html {
   -webkit-text-size-adjust: 100%;
 }
@@ -60,6 +208,7 @@ html, body, #app {
 
 body {
   background: var(--bg);
+  transition: background-color 0.2s ease, color 0.2s ease;
   color: var(--ink);
 }
 
@@ -241,9 +390,17 @@ button {
 
 .ss-foot-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+
+/* Desktop sidebar: theme switch gets its own full-width row. */
+.ss-foot-row .theme-switch {
+  order: -1;
+  flex: 1 1 100%;
 }
 
 .midi-status.compact {
@@ -582,8 +739,8 @@ button {
     linear-gradient(#fff, #fff) 7px 8px / 6px 20px no-repeat,
     linear-gradient(#fff, #fff) 15px 8px / 6px 20px no-repeat,
     linear-gradient(#fff, #fff) 23px 8px / 6px 20px no-repeat,
-    linear-gradient(var(--ink), var(--ink)) 12px 8px / 4px 12px no-repeat,
-    linear-gradient(var(--ink), var(--ink)) 20px 8px / 4px 12px no-repeat,
+    linear-gradient(#101828, #101828) 12px 8px / 4px 12px no-repeat,
+    linear-gradient(#101828, #101828) 20px 8px / 4px 12px no-repeat,
     var(--accent);
 }
 
@@ -2228,7 +2385,15 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
 
   .ss-foot-row {
     gap: 6px;
+    flex-wrap: nowrap;
   }
+
+  .ss-foot-row .theme-switch {
+    order: 0;
+    flex: 0 0 auto;
+  }
+
+  .theme-switch button { width: 28px; height: 28px; }
 
   .ss-nav {
     display: grid;

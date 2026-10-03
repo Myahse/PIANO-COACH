@@ -1,3 +1,4 @@
+import { themeColor } from "../ui/theme";
 import { octave } from "../music/notes";
 import { tileDuration, type TimedNote } from "../music/timed";
 import type { PianoView } from "../ui/piano";
@@ -93,7 +94,7 @@ export class PianoRoll {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const hitY = height - 3;
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#f8f9fb";
+    ctx.fillStyle = themeColor("--stage", "#f8f9fb");
     ctx.fillRect(0, 0, width, height);
 
     const pixelsPerSecond = (hitY - 16) / LOOKAHEAD;
@@ -104,9 +105,9 @@ export class PianoRoll {
     const pianoWidth = pianoEl?.clientWidth ?? width;
     const layout = pianoWidth > 0 ? this.piano.virtualLayout(pianoWidth) : new Map();
 
-    ctx.fillStyle = "rgba(79, 70, 229, 0.08)";
+    ctx.fillStyle = themeColor("--accent-soft", "#eef2ff");
     ctx.fillRect(0, hitY - 7, width, 14);
-    ctx.strokeStyle = "#4f46e5";
+    ctx.strokeStyle = themeColor("--accent", "#4f46e5");
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(0, hitY);
@@ -120,7 +121,7 @@ export class PianoRoll {
     drawOctaveGuides(ctx, layout, shiftX, hitY, width);
 
     if (time < 0) {
-      ctx.fillStyle = "#4f46e5";
+      ctx.fillStyle = themeColor("--accent", "#4f46e5");
       ctx.font = "700 20px Inter, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(String(Math.max(1, Math.ceil(-time))), width / 2, 36);
@@ -184,7 +185,7 @@ export class PianoRoll {
     ctx.restore();
 
     if (time < -COUNT_IN + 0.05) {
-      ctx.fillStyle = "#98a2b3";
+      ctx.fillStyle = themeColor("--muted", "#98a2b3");
       ctx.font = "500 13px Inter, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("Notes fall to the line in time with the song", width / 2, height / 2);
@@ -203,13 +204,13 @@ function drawOctaveGuides(
     if (midi % 12 !== 0) continue;
     const x = slot.x + shiftX;
     if (x < -24 || x > canvasWidth + 24) continue;
-    ctx.strokeStyle = "rgba(16, 24, 40, 0.07)";
+    ctx.strokeStyle = themeColor("--line", "#e4e7ec");
     ctx.lineWidth = midi === 60 ? 2 : 1;
     ctx.beginPath();
     ctx.moveTo(x, 8);
     ctx.lineTo(x, hitY);
     ctx.stroke();
-    ctx.fillStyle = "#98a2b3";
+    ctx.fillStyle = themeColor("--muted", "#98a2b3");
     ctx.font = "600 10px Inter, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
