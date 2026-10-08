@@ -42,6 +42,7 @@ export class PianoRoll {
       this.piano.invalidateLayout();
     };
     window.addEventListener("resize", markLayoutDirty);
+    window.addEventListener("themechange", markLayoutDirty);
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(markLayoutDirty);
       observer.observe(this.canvas);

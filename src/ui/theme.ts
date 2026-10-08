@@ -28,10 +28,11 @@ export function initTheme(): void {
 export function themeColor(token: string, fallback: string): string {
   if (typeof document === "undefined") return fallback;
   palette ??= new Map();
-  let value = palette.get(token);
+  const cacheKey = `${isDark() ? "dark" : "light"}:${token}`;
+  let value = palette.get(cacheKey);
   if (value === undefined) {
     value = getComputedStyle(document.documentElement).getPropertyValue(token).trim() || fallback;
-    palette.set(token, value);
+    palette.set(cacheKey, value);
   }
   return value;
 }

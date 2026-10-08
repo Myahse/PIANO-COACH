@@ -70,22 +70,13 @@
     --played: #53b1fd;
     --streak: #fdb022;
     --white-key: #e9ecf1;
-    --white-ink: #475467;
+    --white-ink: #344054;
     --black-key: #0c0e13;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
   }
 
-  /* Tinted unit cards adapt to the dark surface. */
-  .unit-banner {
-    background: color-mix(in srgb, var(--tone-ink, var(--accent)) 16%, var(--surface));
-    border-color: color-mix(in srgb, var(--tone-ink, var(--accent)) 35%, var(--surface));
-  }
-
-  .unit-banner > p:first-child {
-    color: color-mix(in srgb, var(--tone-ink, var(--accent)) 45%, #fff);
-  }
 }
 
 /* —— Icons —— */
@@ -103,7 +94,7 @@
 
 .stat-icon { width: 15px; height: 15px; align-self: center; color: var(--muted); }
 .game-stat.flame .stat-icon { color: var(--streak); }
-.game-stat.hot .stat-icon { fill: color-mix(in srgb, var(--streak) 30%, transparent); }
+.game-stat.hot .stat-icon { color: var(--streak); }
 .game-stat.xp .stat-icon { color: var(--accent); }
 
 .star-on { color: #f5b400; }
@@ -291,7 +282,7 @@ button {
 }
 
 .ss-recent-item:hover {
-  background: rgba(16, 24, 40, 0.042);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
 .ss-sidebar-foot {
@@ -375,6 +366,7 @@ button {
   margin: 0 0 2px;
   font-size: 20px;
   font-weight: 700;
+  color: var(--ink);
 }
 
 .ss-song-meta {
@@ -410,9 +402,19 @@ button {
   flex: 1 1 140px;
   display: grid;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--ink-2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ss-settings-grid > label select {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
 }
 
 .ss-settings-grid > label.toggle {
@@ -420,6 +422,11 @@ button {
   flex: 0 0 auto;
   min-width: 0;
   align-self: center;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
 }
 
 .ss-settings-grid select { font-size: 14px; }
@@ -453,6 +460,10 @@ button {
 }
 
 .model-setup-steps li.done {
+  color: var(--ink);
+}
+
+.model-setup-steps li.done strong {
   color: var(--correct-ink);
 }
 
@@ -784,6 +795,12 @@ select {
   border-radius: 10px;
   padding: 9px 12px;
   color: var(--ink);
+  background-color: var(--surface);
+}
+
+select option {
+  color: var(--ink);
+  background-color: var(--surface);
 }
 
 input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
@@ -1396,11 +1413,18 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
 .score { min-width: 640px; height: 230px; }
 .score .brace { stroke: var(--ink); stroke-width: 3; }
 .score .bar { stroke: var(--ink-2); stroke-width: 1.2; }
-.score .beat-grid { stroke: rgba(16, 24, 40, 0.12); stroke-width: 1; stroke-dasharray: 2 4; }
+.score .beat-grid {
+  stroke: color-mix(in srgb, var(--ink) 14%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
 .score-header, .score-key, .score-sig, .score-tempo {
-  fill: var(--muted);
+  fill: var(--ink-2);
   font-size: 11px;
   font-family: inherit;
+}
+.score-tempo {
+  fill: var(--muted);
 }
 .score-sig { letter-spacing: 0.08em; }
 .score-header { font-weight: 600; }
@@ -1562,7 +1586,7 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
   z-index: 100;
   display: grid;
   place-items: center;
-  background: rgba(16, 24, 40, 0.45);
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
   backdrop-filter: blur(6px);
   padding: 24px;
 }
@@ -2761,5 +2785,75 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
   .course-practice-dock .course-roll-host {
     height: min(34vh, 180px);
     min-height: 120px;
+  }
+}
+
+/* Dark theme — must come after light rules (same selectors win by order). */
+@media (prefers-color-scheme: dark) {
+  .tone-forest,
+  .tone-ocean,
+  .tone-grape,
+  .tone-ember,
+  .tone-mint,
+  .tone-dusk,
+  .tone-maple,
+  .tone-gold {
+    --tone-bg: color-mix(in srgb, var(--tone-ink) 16%, var(--surface));
+    --tone-line: color-mix(in srgb, var(--tone-ink) 35%, transparent);
+  }
+
+  .unit-banner {
+    background: color-mix(in srgb, var(--tone-ink, var(--accent)) 16%, var(--surface));
+    border-color: color-mix(in srgb, var(--tone-ink, var(--accent)) 35%, var(--surface));
+    color: var(--ink);
+  }
+
+  .unit-banner > p:first-child {
+    color: color-mix(in srgb, var(--tone-ink, var(--accent)) 55%, #fff);
+  }
+
+  .unit-banner h3 {
+    color: var(--ink);
+  }
+
+  .unit-banner .unit-blurb {
+    color: var(--ink-2);
+  }
+
+  .import-box.drag,
+  .import-box:hover {
+    background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  }
+
+  .dropzone-icon {
+    background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+    color: var(--accent-ink);
+  }
+
+  .ss-nav-item.active {
+    color: var(--accent-ink);
+  }
+
+  .ghost.active,
+  .chip.active {
+    color: var(--accent-ink);
+  }
+
+  .ss-song-info h2,
+  .ss-song-info h3 {
+    color: var(--ink);
+  }
+
+  .ss-song-meta,
+  .ss-connect-hint,
+  .hint,
+  .model-setup-panel .hint,
+  [data-import-status],
+  .ss-settings-grid > label {
+    color: var(--ink-2);
+  }
+
+  .ss-playroom .live-stats {
+    color: var(--ink-2);
   }
 }
