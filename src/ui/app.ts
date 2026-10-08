@@ -1,6 +1,7 @@
 import { audioBufferToWavFile } from "../audio/wavFile";
 import { icon, starIcons, type IconName } from "./icons";
 import { planGroupsFromTimed } from "./fingering";
+import { makePlayable } from "../music/playable";
 import { Metronome } from "../audio/metronome";
 import { PianoSynth } from "../audio/pianoSynth";
 import {
@@ -803,7 +804,8 @@ export function mountApp(host: HTMLElement): void {
     } else {
       notes = refineNoteDurations(limitExtremeFlood(fixSemitoneSlips(notes)));
     }
-    return notes;
+    // What you practise must fit two human hands.
+    return makePlayable(notes);
   };
 
   const courseNotesForLevel = (level: LevelDef): TimedNote[] | undefined => {
@@ -871,6 +873,8 @@ export function mountApp(host: HTMLElement): void {
     } else {
       notes = refineNoteDurations(limitExtremeFlood(fixSemitoneSlips(notes)));
     }
+    // What you practise must fit two human hands.
+    notes = makePlayable(notes);
     const speed = loadPracticeSpeed();
     live.setPracticeSpeed(speed);
     if (speed !== 1) notes = scaleTimedNotes(notes, speed);
