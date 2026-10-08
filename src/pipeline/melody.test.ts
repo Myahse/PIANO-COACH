@@ -40,6 +40,23 @@ describe("extractResidualMelody", () => {
     expect(extractResidualMelody(strays, pianoChords)).toEqual([]);
   });
 
+  it("joins a held sung note that came back as back-to-back pieces", () => {
+    // A3 sung for ~0.8 s, detected as three touching pieces, then sung again after a breath.
+    const pieces = [sungNote(69, 0.3, 0.24), sungNote(69, 0.54, 0.3), sungNote(69, 0.85, 0.27), sungNote(69, 1.4, 0.3)];
+    const line = [...pieces, sungNote(67, 2, 0.4), sungNote(65, 2.6, 0.5), sungNote(64, 3.2, 0.5)];
+    const melody = extractResidualMelody(line, []);
+    const a3 = melody.filter((m) => m.note === 69);
+    expect(a3).toHaveLength(2);
+    expect(a3[0]!.duration).toBeCloseTo(0.82, 2);
+  });
+
+  it("keeps a few long held sung notes over a busy piano part", () => {
+    const busyPiano: TimedNote[] = [];
+    for (let i = 0; i < 48; i++) busyPiano.push(n([48, 52, 55][i % 3]!, i * 0.17, 0.15));
+    const held = [76, 74, 72, 74].map((note, i) => sungNote(note, 0.3 + i * 2, 1.9));
+    expect(extractResidualMelody(held, busyPiano).map((m) => m.note)).toEqual([76, 74, 72, 74]);
+  });
+
   it("drops isolated one-off blips", () => {
     const melody = extractResidualMelody([n(81, 3.3, 0.2), n(62, 9, 0.4)], pianoChords.slice(0, 3));
     expect(melody).toEqual([]);

@@ -13,9 +13,24 @@ const MELODY_HIGH = 96;
 const VIBRATO_SPREAD = 0.3;
 /** Steady-pitch (no vibrato) leftovers must be at least this long to count as melody. */
 const MIN_STEADY_DURATION = 0.25;
-/** A real melody line is a meaningful share of the piece; a few stray leftovers are noise. */
+/**
+ * A real melody line is a meaningful part of the piece — enough notes, or (for long held sung
+ * notes) enough of the running time. A few stray leftovers are noise.
+ */
 const MIN_LINE_NOTES = 4;
 const MIN_LINE_SHARE = 0.15;
+const MIN_HELD_NOTES = 3;
+const MIN_TIME_SHARE = 0.25;
+
+function isRealLine(line: TimedNote[], piano: TimedNote[]): boolean {
+  if (line.length >= Math.max(MIN_LINE_NOTES, piano.length * MIN_LINE_SHARE)) return true;
+  if (line.length < MIN_HELD_NOTES) return false;
+  const all = [...line, ...piano];
+  const from = Math.min(...all.map((n) => n.start));
+  const to = Math.max(...all.map((n) => n.start + n.duration));
+  const sung = line.reduce((sum, n) => sum + n.duration, 0);
+  return sung >= (to - from) * MIN_TIME_SHARE;
+}
 
 function isExplainedByPiano(note: MelodyCandidate, piano: TimedNote[]): boolean {
   // Piano notes hold a steady pitch; vibrato means a voice (even one doubling the piano's octave).
@@ -52,6 +67,27 @@ function skyline(notes: TimedNote[]): TimedNote[] {
   return line.filter((note) => note.duration >= MIN_MELODY_DURATION * 0.8);
 }
 
+/**
+ * A held sung note often comes back from the transcriber as back-to-back pieces of the same
+ * pitch (the pitch wobbles, the detector restarts). Join pieces that follow with no real gap;
+ * a deliberately repeated note has a breath or consonant between the attacks.
+ */
+const LEGATO_GAP = 0.06;
+
+function joinHeldNotes(line: TimedNote[]): TimedNote[] {
+  const out: TimedNote[] = [];
+  for (const note of line) {
+    const prev = out.at(-1);
+    if (prev && prev.note === note.note && note.start - (prev.start + prev.duration) <= LEGATO_GAP) {
+      prev.duration = Math.max(prev.duration, note.start + note.duration - prev.start);
+      prev.velocity = Math.max(prev.velocity ?? 0, note.velocity ?? 0);
+      continue;
+    }
+    out.push({ ...note });
+  }
+  return out;
+}
+
 /** Drop notes with no melodic neighbour — a real line has company within a couple of seconds. */
 function dropIsolated(notes: TimedNote[], window = 2.5, minNeighbours = 1): TimedNote[] {
   return notes.filter((note) => {
@@ -82,8 +118,8 @@ export function extractResidualMelody(candidates: MelodyCandidate[], piano: Time
       note.note <= MELODY_HIGH &&
       !isExplainedByPiano(note, pianoSorted),
   );
-  const line = dropIsolated(skyline(residual));
-  if (line.length < Math.max(MIN_LINE_NOTES, piano.length * MIN_LINE_SHARE)) return [];
+  const line = dropIsolated(joinHeldNotes(skyline(residual)));
+  if (!isRealLine(line, piano)) return [];
   return line.map(({ note, start, duration, velocity }) => ({
     note,
     start,

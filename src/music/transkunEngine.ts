@@ -2,10 +2,14 @@ import { bufferToMono } from "../transkun/audioLoad";
 import { loadTranskunBuffers, type TranskunBuffers } from "../transkun/buffers";
 import { TranskunHeadsModel, TranskunModel } from "../transkun/onnxModel";
 import { TranskunTranscriber, type TranscribeProgress } from "../transkun/transcriber";
+import { applySustainPedal, withMinimumLength, type PedalSpan } from "./pedal";
 import { mergeLegatoFragments, type TimedNote } from "./timed";
 
 /** TuesdayCrowd/transkun-onnx — ONNX export of Yujia Yan Transkun V2 (Neural Semi-CRF). */
 export const TRANSKUN_V2_LABEL = "Transkun V2";
+
+/** Shortest sounding length given to a key tap (seconds). */
+const MIN_SOUNDING = 0.08;
 
 const HF_BASE = "https://huggingface.co/TuesdayCrowd/transkun-onnx/resolve/main/";
 const LOCAL_BASE = "/models/transkun/";
@@ -91,7 +95,16 @@ export async function transcribeWithTranskun(
     duration: Math.max(0.03, note.durationSample / fs),
     velocity: note.velocity,
   }));
-  return mergeLegatoFragments(notes, 0.02);
+  // Transkun gives key-press times; the sustain pedal keeps tapped keys ringing.
+  const pedal: PedalSpan[] = [];
+  for (let i = 0; i + 1 < result.pedal.length; i += 2) {
+    const down = result.pedal[i]!;
+    const up = result.pedal[i + 1]!;
+    if (down.on && !up.on) pedal.push({ start: down.sample / fs, end: up.sample / fs });
+  }
+  // A tapped key still sounds for a moment; very short taps would otherwise be discarded as
+  // transcription blips by the cleanup stage.
+  return withMinimumLength(applySustainPedal(mergeLegatoFragments(notes, 0.02), pedal), MIN_SOUNDING);
 }
 
 /** Load Transkun V2 into memory (optional warm-up before the first import). */
