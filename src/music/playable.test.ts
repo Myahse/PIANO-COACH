@@ -40,4 +40,20 @@ describe("makePlayable", () => {
     const out = makePlayable([n(36, 0, 4), n(72, 0, 0.5), n(74, 1, 0.5), n(76, 2, 0.5)]);
     expect(out.find((x) => x.note === 36)!.duration).toBe(4);
   });
+
+  it("folds a bass that would have to jump too far, too fast, an octave toward the hand", () => {
+    // Left hand on C3, then a low C1 a fifth of a second later: the bass is played as C2.
+    const out = makePlayable([n(48, 0, 0.2), n(72, 0, 0.2), n(24, 0.2, 0.2), n(74, 0.2, 0.2)]);
+    expect(out.map((x) => x.note)).toEqual([48, 72, 36, 74]);
+  });
+
+  it("never moves the melody, however far it leaps", () => {
+    const out = makePlayable([n(60, 0, 0.2), n(96, 0.2, 0.2)]);
+    expect(out.map((x) => x.note)).toEqual([60, 96]);
+  });
+
+  it("drops a lone blip far from everything else", () => {
+    const out = makePlayable([n(60, 0, 1), n(64, 1, 1), n(100, 1.5, 0.06), n(62, 2, 1)]);
+    expect(out.map((x) => x.note)).toEqual([60, 64, 62]);
+  });
 });

@@ -36,6 +36,12 @@ export const MAX_SPAN = 7;
 const MAX_NOTES = 5;
 /** How many upcoming note groups a hand looks at when it has to choose a new position. */
 const LOOKAHEAD = 12;
+/**
+ * How far a hand can travel between notes: LEAP_BASE white keys at once plus LEAP_SPEED per second
+ * of time it has. Jumps beyond that are what makes a passage unplayable at tempo.
+ */
+export const LEAP_BASE = 4;
+export const LEAP_SPEED = 15;
 
 /** Position of a key in white-key units; black keys sit halfway between their neighbours. */
 export function keyPosition(midi: number): number {
@@ -130,9 +136,12 @@ export class HandPlanner {
   private holding: Record<HandSide, Set<number>> = { left: new Set(), right: new Set() };
   private plan: Record<HandSide, { at: number; anchor: number }[]> = { left: [], right: [] };
   private mode: HandMode = null;
+  /** When each hand last struck a note (seconds or lesson step). */
+  private lastAt: Record<HandSide, number | null> = { left: null, right: null };
 
   reset(): void {
     this.anchors = { left: null, right: null };
+    this.lastAt = { left: null, right: null };
     this.holding = { left: new Set(), right: new Set() };
   }
 
@@ -147,11 +156,12 @@ export class HandPlanner {
     // Pass 1: decide which hand plays each note, moving hands the minimum along the way.
     const perSide: Record<HandSide, { at: number; notes: number[] }[]> = { left: [], right: [] };
     for (const group of sorted) {
-      const { left, right } = this.split(group.notes);
+      const { left, right } = this.split(group.notes, group.at);
       for (const [side, notes] of [["left", left], ["right", right]] as const) {
         if (notes.length === 0) continue;
         perSide[side].push({ at: group.at, notes });
         this.anchors[side] = this.shiftedAnchor(side, notes);
+        this.lastAt[side] = group.at;
       }
     }
 
@@ -195,7 +205,7 @@ export class HandPlanner {
     // Sounding notes no hand was holding: newly struck (or released keys ringing on the pedal,
     // which simply stay out of the hands).
     const fresh = [...now].filter((note) => !wasHeld.has(note));
-    const { left, right, unreached } = this.split(fresh);
+    const { left, right, unreached } = this.split(fresh, at);
 
     const result = this.restingPose();
     result.unreached = unreached;
@@ -212,6 +222,7 @@ export class HandPlanner {
 
       const anchor = this.shiftedAnchor(side, keys);
       this.anchors[side] = anchor;
+      if (mine.length > 0 && at !== undefined) this.lastAt[side] = at;
       const { lo, hi } = bounds(keys);
       const stretched = hi - lo > 4;
       result[side] = {
@@ -230,10 +241,10 @@ export class HandPlanner {
    * If no split works (chord too wide for two hands), keep the outer notes — bass and melody —
    * and as many inner notes as fit.
    */
-  private split(notes: number[]): { left: number[]; right: number[]; unreached: number[] } {
+  private split(notes: number[], at?: number): { left: number[]; right: number[]; unreached: number[] } {
     const sorted = [...new Set(notes)].sort((a, b) => a - b);
     if (sorted.length === 0) return { left: [], right: [], unreached: [] };
-    const best = this.bestSplit(sorted);
+    const best = this.bestSplit(sorted, at);
     if (best) return { ...best, unreached: [] };
 
     // Too wide: drop inner notes (nearest the middle of the chord first) until it can be played.
@@ -244,7 +255,7 @@ export class HandPlanner {
       let idx = 1;
       for (let i = 1; i < kept.length - 1; i++) if (Math.abs(i - mid) < Math.abs(idx - mid)) idx = i;
       dropped.push(...kept.splice(idx, 1));
-      const attempt = this.bestSplit(kept);
+      const attempt = this.bestSplit(kept, at);
       if (attempt) return { ...attempt, unreached: dropped.sort((a, b) => a - b) };
     }
     // Even the two outer notes are out of reach of two hands (more than two octaves apart in
@@ -254,14 +265,14 @@ export class HandPlanner {
     return { left: [lowEnd], right: highEnd === lowEnd ? [] : [highEnd], unreached: dropped };
   }
 
-  private bestSplit(sorted: number[]): { left: number[]; right: number[] } | null {
+  private bestSplit(sorted: number[], at?: number): { left: number[]; right: number[] } | null {
     let best: { left: number[]; right: number[] } | null = null;
     let bestCost = Infinity;
     for (let s = 0; s <= sorted.length; s++) {
       const left = sorted.slice(0, s);
       const right = sorted.slice(s);
       if (!reachable(left) || !reachable(right)) continue;
-      const cost = this.handCost("left", left) + this.handCost("right", right);
+      const cost = this.handCost("left", left, at) + this.handCost("right", right, at);
       if (cost < bestCost) {
         bestCost = cost;
         best = { left, right };
@@ -270,11 +281,19 @@ export class HandPlanner {
     return best;
   }
 
-  private handCost(side: HandSide, notes: number[]): number {
+  private handCost(side: HandSide, notes: number[], at?: number): number {
     if (notes.length === 0) return 0;
     let cost = moveCost(notes, this.anchors[side] ?? HOME[side]);
-    // Prefer each hand on its own side of the keyboard.
     const positions = notes.map(keyPosition);
+    // A hand that would have to jump further than it can in the time since its last note.
+    const anchor = this.anchors[side];
+    const last = this.lastAt[side];
+    if (at !== undefined && anchor !== null && last !== null) {
+      const centre = positions.reduce((s, p) => s + p, 0) / positions.length;
+      const excess = Math.abs(centre - (anchor + 2)) - (LEAP_BASE + LEAP_SPEED * Math.max(0, at - last));
+      if (excess > 0) cost += excess * 10;
+    }
+    // Prefer each hand on its own side of the keyboard.
     for (const p of positions) {
       if (side === "left" && p > COMFORT.left) cost += (p - COMFORT.left) * 0.75;
       if (side === "right" && p < COMFORT.right) cost += (COMFORT.right - p) * 0.75;
