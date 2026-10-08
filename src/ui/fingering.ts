@@ -2,27 +2,38 @@ import { FIRST_MIDI, isBlackKey } from "../music/notes";
 
 export type HandSide = "left" | "right";
 export type Finger = 1 | 2 | 3 | 4 | 5;
-/** Which hand a lesson is written for; "both" (or null) splits at middle C. */
+/** Which hand a lesson is written for; "both" (or null) lets each note go to the hand that can reach it. */
 export type HandMode = "left" | "right" | "both" | null;
 
-/** One hand's placement: five fingers over white keys `anchor … anchor + span`. */
+/** One hand's placement: fingers spread over white keys `anchor … anchor + span`. */
 export type HandPose = {
   side: HandSide;
   /** Keyboard position (in white keys from the lowest key) of the hand's lowest finger. */
   anchor: number;
-  /** Distance (in white keys) from lowest to highest finger — 4 normally, more when stretching. */
+  /** Distance (in white keys) from lowest to highest finger — 4 at rest, up to MAX_SPAN stretched. */
   span: number;
-  /** Notes currently pressed by this hand, with the finger used. */
+  /** Keys this hand is holding right now, with the finger on each. */
   pressed: Map<number, Finger>;
 };
 
-export type HandsPose = { left: HandPose | null; right: HandPose | null };
+export type HandsPose = {
+  left: HandPose | null;
+  right: HandPose | null;
+  /** Newly struck notes no human hand could take (chord too wide or too many notes). */
+  unreached: number[];
+};
 
 /** A moment in a song (seconds) or lesson (step index) and the notes that start there. */
 export type PlanGroup = { at: number; notes: number[] };
 
-/** Middle C and above go to the right hand, below it to the left — the beginner convention. */
+/** Middle C — the natural boundary between the hands when nothing else decides. */
 export const HAND_SPLIT = 60;
+/**
+ * Widest a hand stretches, thumb to little finger, in white-key steps: an octave
+ * (e.g. C4–C5). Most adults can do this; a ninth or tenth needs a large hand.
+ */
+export const MAX_SPAN = 7;
+const MAX_NOTES = 5;
 /** How many upcoming note groups a hand looks at when it has to choose a new position. */
 const LOOKAHEAD = 12;
 
@@ -46,49 +57,107 @@ function bounds(notes: number[]): { lo: number; hi: number } {
   return { lo: Math.floor(Math.min(...positions)), hi: Math.ceil(Math.max(...positions)) };
 }
 
+/** Can one hand hold all of these at once? */
+export function reachable(notes: number[]): boolean {
+  if (notes.length === 0) return true;
+  if (new Set(notes).size > MAX_NOTES) return false;
+  const { lo, hi } = bounds(notes);
+  return hi - lo <= MAX_SPAN;
+}
+
 function fits(notes: number[], anchor: number): boolean {
   const { lo, hi } = bounds(notes);
   return lo >= anchor && hi <= anchor + 4;
 }
 
+/** How far a five-finger position at `anchor` must move to cover `notes`. */
+function moveCost(notes: number[], anchor: number): number {
+  if (notes.length === 0) return 0;
+  const { lo, hi } = bounds(notes);
+  if (hi - lo > 4) return Math.abs(lo - anchor) * 0.5; // stretched: hand re-centres on the chord
+  if (lo < anchor) return anchor - lo;
+  if (hi > anchor + 4) return hi - (anchor + 4);
+  return 0;
+}
+
 /** Resting places: right thumb on middle C, left little finger on the C below. */
 const HOME: Record<HandSide, number> = { left: keyPosition(48), right: keyPosition(60) };
+/** Beyond these, a note feels "far" for that hand (G4 for the left, E3 for the right). */
+const COMFORT: Record<HandSide, number> = { left: keyPosition(67), right: keyPosition(52) };
 
 /**
- * Decides where each hand sits and which finger plays each sounding note.
+ * Give each finger its own key, in order along the keyboard (thumb lowest for the right hand,
+ * highest for the left). Notes must already be within reach.
+ */
+function assignFingers(side: HandSide, notes: number[], anchor: number): Map<number, Finger> {
+  const sorted = [...new Set(notes)].sort((a, b) => a - b);
+  const positions = sorted.map(keyPosition);
+  const { lo, hi } = bounds(sorted);
+  // Right-hand finger numbers rising left→right; the left hand is the mirror image.
+  let rh: number[];
+  if (hi - lo > 4) {
+    rh = positions.map((p) => 1 + Math.round(((p - lo) / (hi - lo)) * 4));
+  } else {
+    rh = positions.map((p) => {
+      const f = fingerAt("right", p - anchor);
+      return side === "right" ? f : 6 - fingerAt("left", p - anchor);
+    });
+  }
+  // Distinct and in order: never two notes on one finger, never fingers crossing.
+  for (let i = 1; i < rh.length; i++) rh[i] = Math.max(rh[i]!, rh[i - 1]! + 1);
+  for (let i = rh.length - 1; i >= 0; i--) rh[i] = Math.min(rh[i]!, MAX_NOTES - (rh.length - 1 - i));
+  for (let i = 1; i < rh.length; i++) rh[i] = Math.max(rh[i]!, rh[i - 1]! + 1);
+  const out = new Map<number, Finger>();
+  sorted.forEach((note, i) => {
+    const f = rh[i]!;
+    out.set(note, (side === "right" ? f : 6 - f) as Finger);
+  });
+  return out;
+}
+
+/**
+ * Decides where each hand sits and which finger plays each note — within what a human hand can do:
+ * at most five notes per hand, each on its own finger, spanning no more than an octave.
  *
- * With a plan (the whole song or lesson known up front) a hand that has to move picks the
- * five-finger position that covers the most upcoming notes — so E D C starts as 3 2 1 over a
- * C position instead of putting the thumb on E. Without a plan it shifts the minimum distance.
- * Wide chords (e.g. octaves) stretch the hand from thumb to little finger.
+ * Each newly struck chord is split between the hands wherever both halves are reachable and the
+ * hands move least. Keys already held stay under their fingers only while they still fit with the
+ * new notes; otherwise the hand lets go (the sustain pedal keeps them ringing). With a plan (the
+ * whole song or lesson known up front) a hand that has to move picks the five-finger position
+ * that covers the most upcoming notes — so E D C starts as 3 2 1 over a C position.
  */
 export class HandPlanner {
   private anchors: Record<HandSide, number | null> = { left: null, right: null };
+  private holding: Record<HandSide, Set<number>> = { left: new Set(), right: new Set() };
   private plan: Record<HandSide, { at: number; anchor: number }[]> = { left: [], right: [] };
   private mode: HandMode = null;
 
   reset(): void {
     this.anchors = { left: null, right: null };
+    this.holding = { left: new Set(), right: new Set() };
   }
 
-  /** Pre-plan hand positions for a song or lesson; `mode` pins every note to one hand. */
+  /** Pre-plan hand positions for a song or lesson; `mode` prefers one hand for every note. */
   setPlan(groups: PlanGroup[] | null, mode: HandMode = null): void {
-    this.reset();
+    this.mode = mode;
     this.plan = { left: [], right: [] };
-    // A one-hand lesson only stays one-handed if every chord fits in a hand (≤ an octave);
-    // otherwise (e.g. an imported song with a bass line) split the hands at middle C.
-    const playable = (groups ?? []).every((group) => {
-      if (group.notes.length === 0) return true;
-      const { lo, hi } = bounds(group.notes);
-      return hi - lo <= 7;
-    });
-    this.mode = playable ? mode : null;
+    this.reset();
     if (!groups) return;
     const sorted = [...groups].sort((a, b) => a.at - b.at);
+
+    // Pass 1: decide which hand plays each note, moving hands the minimum along the way.
+    const perSide: Record<HandSide, { at: number; notes: number[] }[]> = { left: [], right: [] };
+    for (const group of sorted) {
+      const { left, right } = this.split(group.notes);
+      for (const [side, notes] of [["left", left], ["right", right]] as const) {
+        if (notes.length === 0) continue;
+        perSide[side].push({ at: group.at, notes });
+        this.anchors[side] = this.shiftedAnchor(side, notes);
+      }
+    }
+
+    // Pass 2: per hand, choose positions that cover the most upcoming notes.
     for (const side of ["left", "right"] as const) {
-      const mine = sorted
-        .map((group) => ({ at: group.at, notes: this.notesFor(side, group.notes) }))
-        .filter((group) => group.notes.length > 0);
+      const mine = perSide[side];
       let anchor: number | null = null;
       mine.forEach((group, i) => {
         const { lo, hi } = bounds(group.notes);
@@ -98,6 +167,7 @@ export class HandPlanner {
         this.plan[side].push({ at: group.at, anchor });
       });
     }
+    this.reset();
   }
 
   /** Default resting pose, or wherever the hands last were. */
@@ -105,28 +175,124 @@ export class HandPlanner {
     return {
       left: { side: "left", anchor: this.anchors.left ?? HOME.left, span: 4, pressed: new Map() },
       right: { side: "right", anchor: this.anchors.right ?? HOME.right, span: 4, pressed: new Map() },
+      unreached: [],
     };
   }
 
-  /** Hand poses for the notes sounding now; `at` (seconds or step) selects the planned position. */
-  update(notes: number[], at?: number): HandsPose {
+  /**
+   * Hand poses for the notes sounding now. Notes that were not sounding a moment ago are newly
+   * struck; `at` (seconds or step) selects the planned position.
+   */
+  update(sounding: number[], at?: number): HandsPose {
     if (at !== undefined) {
       for (const side of ["left", "right"] as const) {
         const planned = this.plannedAnchor(side, at);
         if (planned !== null) this.anchors[side] = planned;
       }
     }
+    const now = new Set(sounding);
+    const wasHeld = new Set([...this.holding.left, ...this.holding.right]);
+    // Sounding notes no hand was holding: newly struck (or released keys ringing on the pedal,
+    // which simply stay out of the hands).
+    const fresh = [...now].filter((note) => !wasHeld.has(note));
+    const { left, right, unreached } = this.split(fresh);
+
     const result = this.restingPose();
-    for (const side of ["left", "right"] as const) {
-      const mine = [...new Set(this.notesFor(side, notes))].sort((a, b) => a - b);
-      if (mine.length > 0) result[side] = this.place(side, mine);
+    result.unreached = unreached;
+    for (const [side, mine] of [["left", left], ["right", right]] as const) {
+      // Keep holding keys that still sound and still fit with the new notes.
+      let keys = [...mine];
+      const held = [...this.holding[side]].filter((note) => now.has(note));
+      const centre = mine.length ? mine.reduce((s, n) => s + n, 0) / mine.length : null;
+      held.sort((a, b) => (centre === null ? 0 : Math.abs(a - centre) - Math.abs(b - centre)));
+      for (const note of held) if (reachable([...keys, note])) keys.push(note);
+      keys = [...new Set(keys)].sort((a, b) => a - b);
+      this.holding[side] = new Set(keys);
+      if (keys.length === 0) continue;
+
+      const anchor = this.shiftedAnchor(side, keys);
+      this.anchors[side] = anchor;
+      const { lo, hi } = bounds(keys);
+      const stretched = hi - lo > 4;
+      result[side] = {
+        side,
+        anchor: stretched ? lo : anchor,
+        span: stretched ? hi - lo : 4,
+        pressed: assignFingers(side, keys, anchor),
+      };
     }
     return result;
   }
 
-  private notesFor(side: HandSide, notes: number[]): number[] {
-    if (this.mode === "left" || this.mode === "right") return this.mode === side ? notes : [];
-    return notes.filter((n) => (side === "right" ? n >= HAND_SPLIT : n < HAND_SPLIT));
+  /**
+   * Split newly struck notes between the hands. Every split point of the sorted chord is tried;
+   * splits a hand cannot reach are skipped and the one needing the least hand movement wins.
+   * If no split works (chord too wide for two hands), keep the outer notes — bass and melody —
+   * and as many inner notes as fit.
+   */
+  private split(notes: number[]): { left: number[]; right: number[]; unreached: number[] } {
+    const sorted = [...new Set(notes)].sort((a, b) => a - b);
+    if (sorted.length === 0) return { left: [], right: [], unreached: [] };
+    const best = this.bestSplit(sorted);
+    if (best) return { ...best, unreached: [] };
+
+    // Too wide: drop inner notes (nearest the middle of the chord first) until it can be played.
+    const kept = [...sorted];
+    const dropped: number[] = [];
+    while (kept.length > 2) {
+      const mid = (kept.length - 1) / 2;
+      let idx = 1;
+      for (let i = 1; i < kept.length - 1; i++) if (Math.abs(i - mid) < Math.abs(idx - mid)) idx = i;
+      dropped.push(...kept.splice(idx, 1));
+      const attempt = this.bestSplit(kept);
+      if (attempt) return { ...attempt, unreached: dropped.sort((a, b) => a - b) };
+    }
+    // Even the two outer notes are out of reach of two hands (more than two octaves apart in
+    // one hand's range) — give each hand its own end.
+    const lowEnd = kept[0]!;
+    const highEnd = kept[kept.length - 1]!;
+    return { left: [lowEnd], right: highEnd === lowEnd ? [] : [highEnd], unreached: dropped };
+  }
+
+  private bestSplit(sorted: number[]): { left: number[]; right: number[] } | null {
+    let best: { left: number[]; right: number[] } | null = null;
+    let bestCost = Infinity;
+    for (let s = 0; s <= sorted.length; s++) {
+      const left = sorted.slice(0, s);
+      const right = sorted.slice(s);
+      if (!reachable(left) || !reachable(right)) continue;
+      const cost = this.handCost("left", left) + this.handCost("right", right);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = { left, right };
+      }
+    }
+    return best;
+  }
+
+  private handCost(side: HandSide, notes: number[]): number {
+    if (notes.length === 0) return 0;
+    let cost = moveCost(notes, this.anchors[side] ?? HOME[side]);
+    // Prefer each hand on its own side of the keyboard.
+    const positions = notes.map(keyPosition);
+    for (const p of positions) {
+      if (side === "left" && p > COMFORT.left) cost += (p - COMFORT.left) * 0.75;
+      if (side === "right" && p < COMFORT.right) cost += (COMFORT.right - p) * 0.75;
+    }
+    // A one-hand lesson keeps notes in that hand whenever it can reach them.
+    if ((this.mode === "left" || this.mode === "right") && this.mode !== side) cost += 20 * notes.length;
+    return cost;
+  }
+
+  /** Five-finger position for these notes, moving the hand as little as possible. */
+  private shiftedAnchor(side: HandSide, notes: number[]): number {
+    const { lo, hi } = bounds(notes);
+    let anchor = this.anchors[side];
+    if (anchor === null) anchor = side === "right" ? lo : hi - 4;
+    if (hi - lo > 4) return lo;
+    if (lo < anchor) anchor = lo;
+    if (hi > anchor + 4) anchor = hi - 4;
+    return anchor;
   }
 
   private plannedAnchor(side: HandSide, at: number): number | null {
@@ -159,31 +325,6 @@ export class HandPlanner {
       }
     }
     return best;
-  }
-
-  private place(side: HandSide, notes: number[]): HandPose {
-    const positions = notes.map(keyPosition);
-    const { lo, hi } = bounds(notes);
-    const pressed = new Map<number, Finger>();
-
-    if (hi - lo > 4) {
-      // Stretch: lowest note under one end of the hand, highest under the other.
-      const span = hi - lo;
-      notes.forEach((note, i) => {
-        const slot = Math.round(((positions[i]! - lo) / span) * 4);
-        pressed.set(note, (side === "right" ? slot + 1 : 5 - slot) as Finger);
-      });
-      return { side, anchor: lo, span, pressed };
-    }
-
-    let anchor = this.anchors[side];
-    if (anchor === null) anchor = side === "right" ? lo : hi - 4;
-    if (lo < anchor) anchor = lo;
-    if (hi > anchor + 4) anchor = hi - 4;
-    this.anchors[side] = anchor;
-
-    notes.forEach((note, i) => pressed.set(note, fingerAt(side, positions[i]! - anchor)));
-    return { side, anchor, span: 4, pressed };
   }
 }
 

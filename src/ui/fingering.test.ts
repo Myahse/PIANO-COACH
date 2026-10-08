@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HandPlanner, fingerAt, keyPosition, planGroupsFromTimed } from "./fingering";
+import { HandPlanner, MAX_SPAN, fingerAt, keyPosition, planGroupsFromTimed, reachable } from "./fingering";
 
 describe("fingerAt", () => {
   it("numbers a five-finger position from the thumb", () => {
@@ -93,11 +93,76 @@ describe("HandPlanner with a plan (look-ahead)", () => {
 });
 
 describe("HandPlanner hand modes", () => {
-  it("splits at middle C when a one-hand lesson contains chords wider than a hand", () => {
+  it("in a one-hand lesson keeps what that hand can reach and gives the rest to the other hand", () => {
     const planner = new HandPlanner();
     planner.setPlan([{ at: 0, notes: [48, 55, 64] }], "right");
     const pose = planner.update([48, 55, 64], 0);
-    expect([...pose.left!.pressed.keys()].sort()).toEqual([48, 55]);
-    expect([...pose.right!.pressed.keys()]).toEqual([64]);
+    expect(pose.left!.pressed.has(48)).toBe(true);
+    expect(pose.right!.pressed.has(64)).toBe(true);
+    for (const hand of [pose.left!, pose.right!]) expect(reachable([...hand.pressed.keys()])).toBe(true);
+  });
+});
+
+/** Every hand pose must be something a person can actually do. */
+function expectHumanPose(pose: ReturnType<HandPlanner["update"]>): void {
+  for (const hand of [pose.left, pose.right]) {
+    if (!hand || hand.pressed.size === 0) continue;
+    const keys = [...hand.pressed.keys()].sort((a, b) => a - b);
+    const fingers = keys.map((k) => hand.pressed.get(k)!);
+    expect(keys.length).toBeLessThanOrEqual(5);
+    expect(keyPosition(keys.at(-1)!) - keyPosition(keys[0]!)).toBeLessThanOrEqual(MAX_SPAN);
+    expect(new Set(fingers).size).toBe(fingers.length); // one finger per key
+    // Fingers in keyboard order: right hand 1→5 upward, left hand 5→1 upward.
+    const ordered = hand.side === "right" ? fingers : [...fingers].reverse();
+    for (let i = 1; i < ordered.length; i++) expect(ordered[i]!).toBeGreaterThan(ordered[i - 1]!);
+  }
+}
+
+describe("HandPlanner stays within a human hand", () => {
+  it("never stretches a hand past an octave or puts two keys on one finger", () => {
+    const planner = new HandPlanner();
+    const chords = [
+      [36, 43, 48, 52, 55, 60, 64, 67, 72], // big spread chord across four octaves
+      [41, 48, 57, 60, 65, 69, 72, 77],
+      [38, 45, 50, 62, 66, 69, 74, 78, 81],
+      [60, 62, 64, 65, 67, 69, 71], // seven-note cluster
+    ];
+    for (const chord of chords) expectHumanPose(planner.update(chord));
+  });
+
+  it("leaves out inner notes of a chord too wide for two hands, keeping bass and top", () => {
+    const planner = new HandPlanner();
+    const pose = planner.update([24, 36, 48, 60, 72, 84, 96]); // seven Cs, six octaves
+    expectHumanPose(pose);
+    const held = [...pose.left!.pressed.keys(), ...pose.right!.pressed.keys()];
+    expect(held).toContain(24);
+    expect(held).toContain(96);
+    expect(pose.unreached.length).toBeGreaterThan(0);
+  });
+
+  it("lets go of keys left ringing on the pedal when the hand moves on", () => {
+    const planner = new HandPlanner();
+    // Arpeggio C3 G3 E4 C5 G5 under the pedal: every note keeps sounding.
+    const arpeggio = [48, 55, 64, 72, 79];
+    const sounding: number[] = [];
+    let pose = planner.update([]);
+    for (const note of arpeggio) {
+      sounding.push(note);
+      pose = planner.update([...sounding]);
+      expectHumanPose(pose);
+    }
+    const fingered = [...pose.left!.pressed.keys(), ...pose.right!.pressed.keys()];
+    expect(fingered).toContain(79);
+    expect(fingered.length).toBeLessThan(arpeggio.length);
+  });
+
+  it("keeps holding a bass note while the other hand plays the melody", () => {
+    const planner = new HandPlanner();
+    planner.update([48]);
+    for (const note of [64, 62, 60, 62]) {
+      const pose = planner.update([48, note]);
+      expect(pose.left!.pressed.has(48)).toBe(true);
+      expect(pose.right!.pressed.has(note)).toBe(true);
+    }
   });
 });
