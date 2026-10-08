@@ -1,4 +1,5 @@
 import { FIRST_MIDI, LAST_MIDI, isBlackKey, noteLabel, octave } from "../music/notes";
+import { HandPlanner, keyPosition, type HandMode, type HandPose, type HandSide, type PlanGroup } from "./fingering";
 
 export type KeyState = "idle" | "played" | "target" | "correct" | "wrong";
 
@@ -36,6 +37,13 @@ export class PianoView {
   private layoutCache = new Map<number, { x: number; width: number; black: boolean }>();
   private layoutWidth = 0;
   private options: PianoOptions;
+  private whiteTotal = 1;
+  private planner = new HandPlanner();
+  private handsOn = true;
+  private handsLayer: HTMLElement | null = null;
+  private handEls: Partial<Record<HandSide, { root: HTMLElement; palm: HTMLElement; fingers: HTMLElement[] }>> = {};
+  private lastHandNotes: number[] = [];
+  private lastHandAt: number | undefined;
 
   constructor(options: PianoOptions) {
     this.options = options;
@@ -69,6 +77,24 @@ export class PianoView {
       else this.states.set(note, "idle");
       this.paint(note);
     }
+    this.renderHands([]);
+  }
+
+  /** Show or hide the guide hands drawn over the keys. */
+  setHandsVisible(on: boolean): void {
+    this.handsOn = on;
+    this.handsLayer?.classList.toggle("hidden", !on);
+    if (on) this.renderHands(this.lastHandNotes, true, this.lastHandAt);
+  }
+
+  /**
+   * Plan hand positions for the whole song or lesson so hands move ahead of the music.
+   * `at` values are seconds (songs) or step indexes (lessons); pass null to clear.
+   */
+  setHandPlan(groups: PlanGroup[] | null, mode: HandMode = null): void {
+    this.planner.setPlan(groups, mode);
+    this.lastHandAt = groups?.[0]?.at;
+    this.renderHands([], true);
   }
 
   setAutoFollow(on: boolean): void {
@@ -87,7 +113,7 @@ export class PianoView {
     this.paint(note);
   }
 
-  revealTargets(notes: number[]): void {
+  revealTargets(notes: number[], at?: number): void {
     for (const [note, state] of this.states) {
       if (state === "target") this.states.set(note, this.held.has(note) ? "played" : "idle");
     }
@@ -97,6 +123,7 @@ export class PianoView {
     const first = notes[0];
     if (first !== undefined) this.focusNote(first);
     this.paintAll();
+    this.renderHands(notes, false, at);
   }
 
   focusNote(_note: number): void {
@@ -111,7 +138,7 @@ export class PianoView {
     return this.isVisible(note);
   }
 
-  lightTargets(notes: number[]): void {
+  lightTargets(notes: number[], at?: number): void {
     const wanted = new Set(notes);
     let dirty = false;
     for (const [note, state] of this.states) {
@@ -130,6 +157,7 @@ export class PianoView {
       }
     }
     if (dirty) this.paintAll();
+    this.renderHands(notes, false, at);
   }
 
   invalidateLayout(): void {
@@ -267,10 +295,14 @@ export class PianoView {
       if (!this.states.has(midi)) this.states.set(midi, "idle");
     }
 
-    piano.append(whites, blacks);
+    this.whiteTotal = Math.max(1, whiteTotal);
+    this.handsLayer = this.buildHands();
+    this.handsLayer.classList.toggle("hidden", !this.handsOn);
+    piano.append(whites, blacks, this.handsLayer);
     this.invalidateLayout();
     this.syncToolbar();
     this.paintAll();
+    this.renderHands(this.lastHandNotes, true);
   }
 
   private buildOctavePicks(): void {
@@ -337,6 +369,72 @@ export class PianoView {
     if (!(key instanceof HTMLElement)) return null;
     const note = Number(key.dataset.note);
     return Number.isFinite(note) ? note : null;
+  }
+
+  private buildHands(): HTMLElement {
+    const layer = document.createElement("div");
+    layer.className = "hands-layer";
+    layer.setAttribute("aria-hidden", "true");
+    for (const side of ["left", "right"] as const) {
+      const root = document.createElement("div");
+      root.className = `hand hand-${side}`;
+      const palm = document.createElement("div");
+      palm.className = "hand-palm";
+      root.append(palm);
+      const fingers: HTMLElement[] = [];
+      for (let i = 0; i < 5; i++) {
+        const finger = document.createElement("div");
+        // Fingers are ordered left→right on the keyboard; the thumb is outermost toward the middle.
+        const number = side === "right" ? i + 1 : 5 - i;
+        finger.className = `hand-finger${number === 1 ? " thumb" : ""}`;
+        finger.innerHTML = `<span>${number}</span>`;
+        root.append(finger);
+        fingers.push(finger);
+      }
+      layer.append(root);
+      this.handEls[side] = { root, palm, fingers };
+    }
+    return layer;
+  }
+
+  private renderHands(notes: number[], force = false, at?: number): void {
+    const same =
+      notes.length === this.lastHandNotes.length && notes.every((note, i) => note === this.lastHandNotes[i]);
+    if (same && !force) return;
+    this.lastHandNotes = [...notes];
+    if (at !== undefined) this.lastHandAt = at;
+    if (!this.handsOn || !this.handsLayer) return;
+    // Between notes the hands still glide to the planned position for what comes next.
+    const pose = this.planner.update(notes, this.lastHandAt);
+    const resting = this.planner.restingPose();
+    this.placeHand(pose.left ?? resting.left!);
+    this.placeHand(pose.right ?? resting.right!);
+  }
+
+  private placeHand(pose: HandPose): void {
+    const els = this.handEls[pose.side];
+    if (!els) return;
+    const pct = (units: number) => `${(units / this.whiteTotal) * 100}%`;
+    // Resting finger centres: evenly spread over the hand's span, on white-key centres.
+    const xs = Array.from({ length: 5 }, (_, i) => pose.anchor + (i * pose.span) / 4 + 0.5);
+    const pressedIdx = new Map<number, number>();
+    for (const [note, finger] of pose.pressed) {
+      const idx = pose.side === "right" ? finger - 1 : 5 - finger;
+      xs[idx] = keyPosition(note) + 0.5;
+      pressedIdx.set(idx, note);
+    }
+    els.fingers.forEach((el, idx) => {
+      const note = pressedIdx.get(idx);
+      el.style.left = pct(xs[idx]!);
+      el.style.width = pct(0.62);
+      el.classList.toggle("pressed", note !== undefined);
+      el.classList.toggle("on-black", note !== undefined && isBlackKey(note));
+    });
+    const lo = Math.min(...xs) - 0.55;
+    const hi = Math.max(...xs) + 0.55;
+    els.palm.style.left = pct(lo);
+    els.palm.style.width = pct(hi - lo);
+    els.root.classList.toggle("active", pose.pressed.size > 0);
   }
 
   private paintAll(): void {

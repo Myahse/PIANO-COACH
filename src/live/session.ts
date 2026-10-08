@@ -37,6 +37,8 @@ const WAIT_TIMEOUT = 5;
 
 export class LiveSession {
   private notes: TimedNote[] = [];
+  /** Longest tile in the song — how far back a note can start and still be sounding. */
+  private longestTile = 0;
   private title = "Live";
   private audioBuffer: AudioBuffer | null = null;
   private audioOffset = 0;
@@ -88,6 +90,7 @@ export class LiveSession {
     this.stop();
     this.title = title;
     this.notes = notes.map((note) => ({ ...note }));
+    this.longestTile = this.notes.reduce((max, note) => Math.max(max, tileDuration(note)), 0);
     this.audioBuffer = audio ?? null;
     this.audioOffset = Math.max(0, audioOffset);
     this.audioDurationSec = audio?.duration ?? audioDurationSec ?? 0;
@@ -195,9 +198,10 @@ export class LiveSession {
   }
 
   /** Pitches whose tiles are active at `time` — avoids scanning the whole chart each frame. */
+  /** Pitches sounding at `time` — long notes stay listed (key held down) until they end. */
   activeTilePitches(time: number): number[] {
     const out: number[] = [];
-    let i = lowerBoundByStart(this.notes, time - 0.04);
+    let i = lowerBoundByStart(this.notes, time - this.longestTile - 0.04);
     while (i < this.notes.length) {
       const note = this.notes[i]!;
       if (note.start > time) break;

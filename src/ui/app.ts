@@ -1,5 +1,6 @@
 import { audioBufferToWavFile } from "../audio/wavFile";
 import { icon, starIcons, type IconName } from "./icons";
+import { planGroupsFromTimed } from "./fingering";
 import { Metronome } from "../audio/metronome";
 import { PianoSynth } from "../audio/pianoSynth";
 import {
@@ -299,6 +300,7 @@ export function mountApp(host: HTMLElement): void {
             <label class="toggle"><input type="checkbox" data-hear-notes /> Guide</label>
             <label class="toggle"><input type="checkbox" data-wait-for-me /> Wait for me</label>
             <label class="toggle"><input type="checkbox" data-show-sheet checked /> Sheet</label>
+            <label class="toggle"><input type="checkbox" data-show-hands /> Hands</label>
             <label>Practice tempo
               <select data-practice-speed></select>
             </label>
@@ -594,6 +596,18 @@ export function mountApp(host: HTMLElement): void {
   const playStage = $<HTMLElement>("[data-play-stage]");
   const sheetWindow = $<HTMLElement>("[data-sheet-window]");
   const showSheet = $<HTMLInputElement>("[data-show-sheet]");
+  const showHands = $<HTMLInputElement>("[data-show-hands]");
+  const HANDS_KEY = "piano-coach-hands";
+  const handsWanted = (): boolean => {
+    try {
+      return localStorage.getItem(HANDS_KEY) !== "off";
+    } catch {
+      return true;
+    }
+  };
+  showHands.checked = handsWanted();
+  /** Guide hands show while following a song or lesson — not in free play. */
+  const syncHands = (): void => piano.setHandsVisible(showHands.checked && mode !== "free");
   const songMeta = $("[data-song-meta]");
   const sidebarRecents = $<HTMLElement>("[data-sidebar-recents]");
   const settingsPanel = $<HTMLElement>("[data-settings-panel]");
@@ -884,6 +898,7 @@ export function mountApp(host: HTMLElement): void {
     const piece = currentPiece();
     const notes = playableNotes(piece);
     live.load(piece.title, notes, piece.audio, piece.audioOffset, piece.audioDurationSec);
+    piano.setHandPlan(planGroupsFromTimed(notes));
     const level = normalizeSongLevel(songLevelSelect.value);
     tileModeSelect.disabled =
       level !== "hard" ||
@@ -1119,7 +1134,7 @@ export function mountApp(host: HTMLElement): void {
           : "Press Restart to try again";
     roll.draw(snap.notes, snap.time, snap.judged);
     const glowing = snap.waiting ? snap.dueNotes : live.activeTilePitches(snap.time);
-    if (snap.playing || snap.time > -0.05) piano.lightTargets(glowing);
+    if (snap.playing || snap.time > -0.05) piano.lightTargets(glowing, snap.time);
     else piano.clearHighlights();
   };
 
@@ -1159,6 +1174,8 @@ export function mountApp(host: HTMLElement): void {
       libraryPiece?.audioOffset,
       libraryPiece?.audioDurationSec,
     );
+    piano.setHandPlan(planGroupsFromTimed(notes), level.hand ?? null);
+    planKey = "";
     piano.fitNotes(notes.map((note) => note.note));
     if (state.showHint && notes.length) piano.revealTargets([...new Set(notes.map((note) => note.note))]);
     live.play();
@@ -1168,6 +1185,18 @@ export function mountApp(host: HTMLElement): void {
         loopCoursePlay();
       });
     });
+  };
+
+  // Step lessons: plan the hands over the lesson's whole note sequence once per level.
+  let planKey = "";
+  const planLessonHands = (state: { level?: { id: string } | null; sequence: number[][]; hand: Hand | null }): void => {
+    const key = `${state.level?.id ?? ""}:${state.sequence.map((step) => step.join(".")).join(",")}`;
+    if (key === planKey) return;
+    planKey = key;
+    piano.setHandPlan(
+      state.sequence.map((notes, at) => ({ at, notes })),
+      state.hand ?? null,
+    );
   };
 
   const renderLearn = (state: LessonSnapshot): void => {
@@ -1240,9 +1269,10 @@ export function mountApp(host: HTMLElement): void {
     const targets = state.level?.kind === "hold" && state.level.bass !== undefined
       ? [state.level.bass, ...state.expected]
       : state.expected;
+    if (!inPlayLesson) planLessonHands(state);
     piano.clearHighlights();
     if (targets.length) piano.focusSpan(targets);
-    if (state.showHint && targets.length) piano.revealTargets(targets);
+    if (state.showHint && targets.length) piano.revealTargets(targets, state.index);
 
     if (inPlayLesson) {
       sequenceStrip.hidden = true;
@@ -1309,9 +1339,14 @@ export function mountApp(host: HTMLElement): void {
     flash.dataset.result = state.lastResult;
     renderStaff(staffHost, staffNotesFor(state), { clef: state.level?.clef, showName: false });
 
+    planLessonHands({
+      level: state.level,
+      sequence: state.sequence.map((note) => [note]),
+      hand: state.level?.clef === "bass" ? "left" : "right",
+    });
     piano.clearHighlights();
     if (state.showHint && state.expected.length) {
-      piano.revealTargets(state.expected);
+      piano.revealTargets(state.expected, state.index);
       const target = state.expected[0];
       if (target !== undefined) piano.focusNote(target);
     } else if (state.expected[0] !== undefined) {
@@ -1344,6 +1379,7 @@ export function mountApp(host: HTMLElement): void {
     void saveLibraryPiece(updated);
     const notes = playableNotes(updated);
     live.load(updated.title, notes, updated.audio, updated.audioOffset, updated.audioDurationSec);
+    piano.setHandPlan(planGroupsFromTimed(notes));
     noteEditor.markClean();
   };
 
@@ -1441,7 +1477,7 @@ export function mountApp(host: HTMLElement): void {
     roll.draw(snap.notes, snap.time, snap.judged);
     if (sheetToggle.checked) score.setTime(snap.time);
     const glowing = snap.waiting ? snap.dueNotes : live.activeTilePitches(snap.time);
-    if (snap.playing || snap.time > -0.05) piano.lightTargets(glowing);
+    if (snap.playing || snap.time > -0.05) piano.lightTargets(glowing, snap.time);
     else piano.clearHighlights();
     const now = performance.now();
     if (now - hudAt < 120 && snap.playing) return;
@@ -1498,6 +1534,7 @@ export function mountApp(host: HTMLElement): void {
     appRoot?.classList.toggle("live-on", liveOn);
     syncStudyMode(next);
     piano.setAutoFollow(!liveOn);
+    syncHands();
     if (liveOn) showKeys(true, "live");
     else showKeys(false);
     syncSheetLayout();
@@ -1755,6 +1792,14 @@ export function mountApp(host: HTMLElement): void {
   $("[data-zoom-in]").addEventListener("click", () => score.zoomBy(0.15));
   $("[data-show-sheet]").addEventListener("change", () => {
     syncSheetLayout();
+  });
+  showHands.addEventListener("change", () => {
+    try {
+      localStorage.setItem(HANDS_KEY, showHands.checked ? "on" : "off");
+    } catch {
+      /* storage unavailable */
+    }
+    syncHands();
   });
   removeBtn.addEventListener("click", () => {
     const piece = currentPiece();

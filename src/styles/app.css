@@ -2169,6 +2169,104 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
   box-shadow: inset 0 -6px 0 var(--wrong);
 }
 
+/* Keys the song is holding look physically pressed for the whole note. */
+.key.white[data-state="target"],
+.key.white[data-state="correct"],
+.key.white.held {
+  transform: translateY(2px);
+  box-shadow: inset 0 -2px 0 var(--accent), inset 0 3px 6px rgba(16, 24, 40, 0.12);
+}
+
+.key.white.held { box-shadow: inset 0 -2px 0 var(--played), inset 0 3px 6px rgba(16, 24, 40, 0.12); }
+.key.white[data-state="correct"] { box-shadow: inset 0 -2px 0 var(--correct), inset 0 3px 6px rgba(16, 24, 40, 0.12); }
+
+.key.black[data-state="target"],
+.key.black[data-state="correct"],
+.key.black.held {
+  transform: translateY(2px);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.3);
+}
+
+.key { transition: background 80ms linear, box-shadow 80ms linear, transform 60ms ease; }
+
+/* —— Guide hands over the keyboard —— */
+.hands-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.hand {
+  --hand: var(--right-hand);
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  transition: opacity 0.2s ease;
+}
+
+.hand-left { --hand: var(--left-hand); }
+.hand.active { opacity: 1; }
+
+.hand-palm {
+  position: absolute;
+  bottom: 0;
+  height: 13%;
+  border-radius: 14px 14px 6px 6px;
+  background: color-mix(in srgb, var(--hand) 22%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--hand) 55%, transparent);
+  border-bottom: 0;
+  transition: left 0.16s ease, width 0.16s ease;
+}
+
+.hand-finger {
+  position: absolute;
+  bottom: 8%;
+  height: 24%;
+  transform: translateX(-50%);
+  border-radius: 999px 999px 6px 6px;
+  background: color-mix(in srgb, var(--hand) 18%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--hand) 50%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 3px;
+  transition: left 0.16s ease, height 0.1s ease, background 0.1s ease;
+}
+
+.hand-finger.thumb { height: 17%; }
+
+.hand-finger span {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: color-mix(in srgb, var(--hand) 80%, var(--ink));
+}
+
+/* The finger playing a note reaches up onto its key and shows its number. */
+.hand-finger.pressed {
+  height: 34%;
+  background: var(--hand);
+  border-color: var(--hand);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--hand) 45%, transparent);
+}
+
+.hand-finger.pressed.on-black { height: 52%; }
+.hand-finger.thumb.pressed { height: 28%; }
+.hand-finger.thumb.pressed.on-black { height: 46%; }
+
+.hand-finger.pressed span {
+  min-width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--hand);
+  font-size: 10px;
+}
+
 .app.sustain .piano-dock {
   box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in srgb, var(--accent) 31%, transparent);
 }
