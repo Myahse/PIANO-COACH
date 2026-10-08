@@ -386,8 +386,8 @@ export class PianoView {
         const finger = document.createElement("div");
         // Fingers are ordered left→right on the keyboard; the thumb is outermost toward the middle.
         const number = side === "right" ? i + 1 : 5 - i;
-        finger.className = `hand-finger${number === 1 ? " thumb" : ""}`;
-        finger.innerHTML = `<span>${number}</span>`;
+        finger.className = `hand-finger f${number}${number === 1 ? " thumb" : ""}`;
+        finger.innerHTML = `<i class="hand-nail"></i><span>${number}</span>`;
         root.append(finger);
         fingers.push(finger);
       }
