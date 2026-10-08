@@ -1,5 +1,7 @@
 import { FIRST_MIDI, LAST_MIDI, isBlackKey, noteLabel, octave } from "../music/notes";
-import { HandPlanner, keyPosition, type HandMode, type HandPose, type HandSide, type PlanGroup } from "./fingering";
+import { HandPlanner, keyPosition, type Finger, type HandMode, type HandPose, type HandsPose, type PlanGroup } from "./fingering";
+import { handSvg, type FingerTarget } from "./handArt";
+import { themeColor } from "./theme";
 
 export type KeyState = "idle" | "played" | "target" | "correct" | "wrong";
 
@@ -40,8 +42,9 @@ export class PianoView {
   private whiteTotal = 1;
   private planner = new HandPlanner();
   private handsOn = true;
-  private handsLayer: HTMLElement | null = null;
-  private handEls: Partial<Record<HandSide, { root: HTMLElement; palm: HTMLElement; fingers: HTMLElement[] }>> = {};
+  private handsLayer: SVGSVGElement | null = null;
+  private lastPose: HandsPose | null = null;
+  private handsResize: ResizeObserver | null = null;
   private lastHandNotes: number[] = [];
   private lastHandAt: number | undefined;
 
@@ -371,29 +374,20 @@ export class PianoView {
     return Number.isFinite(note) ? note : null;
   }
 
-  private buildHands(): HTMLElement {
-    const layer = document.createElement("div");
-    layer.className = "hands-layer";
+  private buildHands(): SVGSVGElement {
+    const layer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    layer.setAttribute("class", "hands-layer");
     layer.setAttribute("aria-hidden", "true");
-    for (const side of ["left", "right"] as const) {
-      const root = document.createElement("div");
-      root.className = `hand hand-${side}`;
-      const palm = document.createElement("div");
-      palm.className = "hand-palm";
-      root.append(palm);
-      const fingers: HTMLElement[] = [];
-      for (let i = 0; i < 5; i++) {
-        const finger = document.createElement("div");
-        // Fingers are ordered left→right on the keyboard; the thumb is outermost toward the middle.
-        const number = side === "right" ? i + 1 : 5 - i;
-        finger.className = `hand-finger f${number}${number === 1 ? " thumb" : ""}`;
-        finger.innerHTML = `<i class="hand-nail"></i><span>${number}</span>`;
-        root.append(finger);
-        fingers.push(finger);
-      }
-      layer.append(root);
-      this.handEls[side] = { root, palm, fingers };
+    // Redraw at the new size when the keyboard is resized.
+    this.handsResize?.disconnect();
+    if (typeof ResizeObserver !== "undefined") {
+      this.handsResize = new ResizeObserver(() => this.drawHands());
+      window.requestAnimationFrame(() => {
+        const piano = this.pianoElement();
+        if (piano) this.handsResize?.observe(piano);
+      });
     }
+    window.addEventListener("themechange", () => this.drawHands());
     return layer;
   }
 
@@ -405,36 +399,53 @@ export class PianoView {
     if (at !== undefined) this.lastHandAt = at;
     if (!this.handsOn || !this.handsLayer) return;
     // Between notes the hands still glide to the planned position for what comes next.
-    const pose = this.planner.update(notes, this.lastHandAt);
-    const resting = this.planner.restingPose();
-    this.placeHand(pose.left ?? resting.left!);
-    this.placeHand(pose.right ?? resting.right!);
+    this.lastPose = this.planner.update(notes, this.lastHandAt);
+    this.drawHands();
   }
 
-  private placeHand(pose: HandPose): void {
-    const els = this.handEls[pose.side];
-    if (!els) return;
-    const pct = (units: number) => `${(units / this.whiteTotal) * 100}%`;
+  /** Draw both hands for the last pose, sized to the keyboard as it is on screen. */
+  private drawHands(): void {
+    const layer = this.handsLayer;
+    const piano = this.pianoElement();
+    if (!layer || !piano || !this.handsOn) return;
+    const width = piano.clientWidth;
+    const height = piano.clientHeight;
+    if (width <= 0 || height <= 0) return;
+    const whiteW = width / this.whiteTotal;
+    const resting = this.planner.restingPose();
+    const pose = this.lastPose ?? resting;
+    layer.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    layer.innerHTML = [pose.left ?? resting.left!, pose.right ?? resting.right!]
+      .map((hand) => this.handMarkup(hand, whiteW, height))
+      .join("");
+  }
+
+  private handMarkup(pose: HandPose, whiteW: number, height: number): string {
     // Resting finger centres: evenly spread over the hand's span, on white-key centres.
     const xs = Array.from({ length: 5 }, (_, i) => pose.anchor + (i * pose.span) / 4 + 0.5);
-    const pressedIdx = new Map<number, number>();
+    const pressedAt = new Map<number, number>();
     for (const [note, finger] of pose.pressed) {
       const idx = pose.side === "right" ? finger - 1 : 5 - finger;
       xs[idx] = keyPosition(note) + 0.5;
-      pressedIdx.set(idx, note);
+      pressedAt.set(idx, note);
     }
-    els.fingers.forEach((el, idx) => {
-      const note = pressedIdx.get(idx);
-      el.style.left = pct(xs[idx]!);
-      el.style.width = pct(0.62);
-      el.classList.toggle("pressed", note !== undefined);
-      el.classList.toggle("on-black", note !== undefined && isBlackKey(note));
+    const fingers: FingerTarget[] = xs.map((x, idx) => {
+      const note = pressedAt.get(idx);
+      return {
+        finger: (pose.side === "right" ? idx + 1 : 5 - idx) as Finger,
+        x: x * whiteW,
+        pressed: note !== undefined,
+        onBlack: note !== undefined && isBlackKey(note),
+      };
     });
-    const lo = Math.min(...xs) - 0.55;
-    const hi = Math.max(...xs) + 0.55;
-    els.palm.style.left = pct(lo);
-    els.palm.style.width = pct(hi - lo);
-    els.root.classList.toggle("active", pose.pressed.size > 0);
+    return handSvg({
+      side: pose.side,
+      fingers,
+      whiteW,
+      height,
+      active: pose.pressed.size > 0,
+      accent: themeColor(pose.side === "left" ? "--left-hand" : "--right-hand", pose.side === "left" ? "#0ea5e9" : "#6366f1"),
+    });
   }
 
   private paintAll(): void {
