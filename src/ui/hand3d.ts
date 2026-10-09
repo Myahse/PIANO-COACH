@@ -13,12 +13,14 @@ export type FingerBadge = { side: HandSide; finger: number; x: number; y: number
 /** A real white key is 23.5 mm wide: the hands are drawn to scale with the keys. */
 const WHITE_KEY_M = 0.0235;
 /** Heights above the white keys' surface, in metres. */
-const KNUCKLE_HEIGHT = 0.042;
+const KNUCKLE_HEIGHT = 0.046;
 const BLACK_KEY_HEIGHT = 0.012;
 const KEY_DIP = 0.004;
 const HOVER = 0.012;
 /** How far back from the fingertips the knuckles sit when the hand is curved over the keys. */
-const KNUCKLE_REACH = 0.05;
+const KNUCKLE_REACH = 0.032;
+/** How much further up the keys a resting fingertip lies than a playing one. */
+const REST_EXTEND = 0.012;
 /**
  * The hands are drawn as a player sees them, from in front and above rather than straight down:
  * anything above the keys shifts up the screen by this much per unit of height, so the back of
@@ -374,7 +376,8 @@ export class Hands3D {
         const z = n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t);
         return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
       }
-      return new THREE.Vector3(centreX + natural[n - 1]!, hover, refZ + shorter * s);
+      // A resting finger hangs a little further out than a playing one: relaxed, not clawed.
+      return new THREE.Vector3(centreX + natural[n - 1]!, hover, refZ + (shorter - REST_EXTEND) * s);
     });
     // Fingers never cross: a resting finger stays between its neighbours (thumb → little finger
     // run left → right on the right hand, right → left on the left hand).
