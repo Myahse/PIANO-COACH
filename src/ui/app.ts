@@ -58,7 +58,7 @@ import { READING_LEVELS, READING_UNITS, READING_UNIT_BLURBS } from "../notation/
 import { ReadingEngine, type ReadingSnapshot } from "../notation/engine";
 import { ScoreView } from "../notation/score";
 import { renderStaff, type StaffNote } from "../notation/staff";
-import { PianoView } from "./piano";
+import { PianoView, type HandStyle } from "./piano";
 
 type Mode = "learn" | "read" | "live" | "library" | "free";
 
@@ -302,6 +302,12 @@ export function mountApp(host: HTMLElement): void {
             <label class="toggle"><input type="checkbox" data-wait-for-me /> Wait for me</label>
             <label class="toggle"><input type="checkbox" data-show-sheet checked /> Sheet</label>
             <label class="toggle"><input type="checkbox" data-show-hands /> Hands</label>
+            <label>Hands look
+              <select data-hand-style>
+                <option value="real">Realistic (3D)</option>
+                <option value="drawn">Drawn</option>
+              </select>
+            </label>
             <label>Practice tempo
               <select data-practice-speed></select>
             </label>
@@ -607,6 +613,14 @@ export function mountApp(host: HTMLElement): void {
     }
   };
   showHands.checked = handsWanted();
+  const handStyle = $<HTMLSelectElement>("[data-hand-style]");
+  const HAND_STYLE_KEY = "piano-coach-hand-style";
+  try {
+    handStyle.value = localStorage.getItem(HAND_STYLE_KEY) === "drawn" ? "drawn" : "real";
+  } catch {
+    handStyle.value = "real";
+  }
+  piano.setHandStyle(handStyle.value as HandStyle);
   /** Guide hands show while following a song or lesson — not in free play. */
   const syncHands = (): void => piano.setHandsVisible(showHands.checked && mode !== "free");
   const songMeta = $("[data-song-meta]");
@@ -1804,6 +1818,14 @@ export function mountApp(host: HTMLElement): void {
       /* storage unavailable */
     }
     syncHands();
+  });
+  handStyle.addEventListener("change", () => {
+    try {
+      localStorage.setItem(HAND_STYLE_KEY, handStyle.value);
+    } catch {
+      /* storage unavailable */
+    }
+    piano.setHandStyle(handStyle.value as HandStyle);
   });
   removeBtn.addEventListener("click", () => {
     const piece = currentPiece();

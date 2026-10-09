@@ -54,6 +54,8 @@ MuScriptor models are downloaded from Hugging Face (~5 GB for the large model). 
 
 Without the Python backends, songs are transcribed in the browser by **Transkun V2**, a dedicated piano transcription model (ONNX, bundled under `public/models/transkun/`). [Spotify Basic Pitch](https://github.com/spotify/basic-pitch) is used only for vocal-only targets or when Transkun cannot load.
 
+The guide hands are rigged 3D hand models (the MIT-licensed [WebXR generic hands](https://github.com/immersive-web/webxr-input-profiles), bundled under `public/models/hands/`), posed by a small finger solver and drawn with three.js. Devices without WebGL, or the "Drawn" setting, get flat illustrated hands instead.
+
 Engine order: MuScriptor (desktop) → Transkun V2 (browser) → Basic Pitch (fallback).
 
 ## Architecture

@@ -1,7 +1,11 @@
 import { FIRST_MIDI, LAST_MIDI, isBlackKey, noteLabel, octave } from "../music/notes";
 import { HandPlanner, keyPosition, type Finger, type HandMode, type HandPose, type HandsPose, type PlanGroup } from "./fingering";
 import { handSvg, type FingerTarget } from "./handArt";
+import type { FingerBadge, Hands3D } from "./hand3d";
 import { themeColor } from "./theme";
+
+/** "real": lit 3D hands; "drawn": the flat illustrated hands (also the fallback without WebGL). */
+export type HandStyle = "real" | "drawn";
 
 export type KeyState = "idle" | "played" | "target" | "correct" | "wrong";
 
@@ -47,6 +51,9 @@ export class PianoView {
   private handsResize: ResizeObserver | null = null;
   private lastHandNotes: number[] = [];
   private lastHandAt: number | undefined;
+  private handStyle: HandStyle = "real";
+  private hands3d: Hands3D | null = null;
+  private hands3dState: "idle" | "loading" | "ready" | "failed" = "idle";
 
   constructor(options: PianoOptions) {
     this.options = options;
@@ -87,7 +94,15 @@ export class PianoView {
   setHandsVisible(on: boolean): void {
     this.handsOn = on;
     this.handsLayer?.classList.toggle("hidden", !on);
+    this.hands3d?.canvas.classList.toggle("hidden", !on || this.handStyle !== "real");
     if (on) this.renderHands(this.lastHandNotes, true, this.lastHandAt);
+  }
+
+  /** Realistic 3D hands or the flat drawn ones. */
+  setHandStyle(style: HandStyle): void {
+    this.handStyle = style;
+    this.hands3d?.canvas.classList.toggle("hidden", !this.handsOn || style !== "real");
+    this.drawHands();
   }
 
   /**
@@ -414,13 +429,68 @@ export class PianoView {
     const whiteW = width / this.whiteTotal;
     const resting = this.planner.restingPose();
     const pose = this.lastPose ?? resting;
+    const hands = [pose.left ?? resting.left!, pose.right ?? resting.right!];
     layer.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    layer.innerHTML = [pose.left ?? resting.left!, pose.right ?? resting.right!]
-      .map((hand) => this.handMarkup(hand, whiteW, height))
+    const real = this.realHands(piano);
+    if (real) {
+      real.setSize(width, height, whiteW);
+      real.setHands(
+        hands.map((hand) => ({ side: hand.side, fingers: this.fingerTargets(hand, whiteW), active: hand.pressed.size > 0 })),
+      );
+      return;
+    }
+    layer.innerHTML = hands.map((hand) => this.handMarkup(hand, whiteW, height)).join("");
+  }
+
+  /** The 3D hands, ready and on this keyboard — or null to draw the flat ones (loading or no WebGL). */
+  private realHands(piano: HTMLElement): Hands3D | null {
+    if (this.handStyle !== "real") return null;
+    if (this.hands3dState === "idle") {
+      this.hands3dState = "loading";
+      void import("./hand3d")
+        .then(({ Hands3D }) => Hands3D.create())
+        .then((hands) => {
+          this.hands3d = hands;
+          this.hands3dState = hands ? "ready" : "failed";
+          if (hands) hands.onBadges = (badges) => this.drawBadges(badges);
+          this.drawHands();
+        });
+    }
+    const real = this.hands3d;
+    if (!real || !this.handsLayer) return null;
+    if (real.canvas.parentElement !== piano) piano.insertBefore(real.canvas, this.handsLayer);
+    real.canvas.classList.toggle("hidden", !this.handsOn);
+    return real;
+  }
+
+  /** Finger numbers on the playing fingers of the 3D hands. */
+  private drawBadges(badges: FingerBadge[]): void {
+    const layer = this.handsLayer;
+    const piano = this.pianoElement();
+    if (!layer || !piano || this.handStyle !== "real") return;
+    const r = Math.max(6, Math.min(8.5, (piano.clientWidth / this.whiteTotal) * 0.32));
+    layer.innerHTML = badges
+      .map((badge) => {
+        const accent = themeColor(badge.side === "left" ? "--left-hand" : "--right-hand", badge.side === "left" ? "#0ea5e9" : "#6366f1");
+        return `<circle cx="${badge.x.toFixed(1)}" cy="${badge.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${accent}" stroke="#fff" stroke-width="1.4"/>
+          <text x="${badge.x.toFixed(1)}" y="${(badge.y + r * 0.36).toFixed(1)}" text-anchor="middle" font-size="${(r * 1.05).toFixed(1)}" font-weight="700" fill="#fff">${badge.finger}</text>`;
+      })
       .join("");
   }
 
   private handMarkup(pose: HandPose, whiteW: number, height: number): string {
+    return handSvg({
+      side: pose.side,
+      fingers: this.fingerTargets(pose, whiteW),
+      whiteW,
+      height,
+      active: pose.pressed.size > 0,
+      accent: themeColor(pose.side === "left" ? "--left-hand" : "--right-hand", pose.side === "left" ? "#0ea5e9" : "#6366f1"),
+    });
+  }
+
+  /** Where each fingertip goes: playing fingers on their keys, the others spread over the hand's span. */
+  private fingerTargets(pose: HandPose, whiteW: number): FingerTarget[] {
     // Resting finger centres: evenly spread over the hand's span, on white-key centres.
     const xs = Array.from({ length: 5 }, (_, i) => pose.anchor + (i * pose.span) / 4 + 0.5);
     const pressedAt = new Map<number, number>();
@@ -429,7 +499,7 @@ export class PianoView {
       xs[idx] = keyPosition(note) + 0.5;
       pressedAt.set(idx, note);
     }
-    const fingers: FingerTarget[] = xs.map((x, idx) => {
+    return xs.map((x, idx) => {
       const note = pressedAt.get(idx);
       return {
         finger: (pose.side === "right" ? idx + 1 : 5 - idx) as Finger,
@@ -437,14 +507,6 @@ export class PianoView {
         pressed: note !== undefined,
         onBlack: note !== undefined && isBlackKey(note),
       };
-    });
-    return handSvg({
-      side: pose.side,
-      fingers,
-      whiteW,
-      height,
-      active: pose.pressed.size > 0,
-      accent: themeColor(pose.side === "left" ? "--left-hand" : "--right-hand", pose.side === "left" ? "#0ea5e9" : "#6366f1"),
     });
   }
 

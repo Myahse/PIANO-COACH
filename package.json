@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.4",
+    "@types/three": "^0.180.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "vitest": "^3.2.4"
@@ -24,6 +25,7 @@
     "@spotify/basic-pitch": "^1.0.1",
     "@tauri-apps/api": "^2.11.1",
     "fflate": "^0.8.3",
-    "onnxruntime-web": "^1.27.0"
+    "onnxruntime-web": "^1.27.0",
+    "three": "^0.180.0"
   }
 }
