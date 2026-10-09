@@ -26,7 +26,9 @@ const KNUCKLE_REACH = 0.05;
  */
 const VIEW_SLANT = 0.5;
 /** Time constant of the hands' movement between poses, in seconds. */
-const GLIDE = 0.055;
+const GLIDE = 0.09;
+/** Time constant of a quick leap to a far part of the keyboard. */
+const LEAP_GLIDE = 0.045;
 /** Time constant of a finger pressing or lifting off a key. */
 const PRESS = 0.03;
 
@@ -99,6 +101,8 @@ type Pose = {
   tips: THREE.Vector3[];
   /** Which fingers (thumb → little finger) are playing. */
   pressed: boolean[];
+  /** How far up the keys the fingertips work (keyboard pixels from the top). */
+  refZ: number;
   /** 1 while the hand plays, 0 at rest (rest is drawn slightly dimmer). */
   activity: number;
 };
@@ -343,11 +347,21 @@ export class Hands3D {
 
     const playing = [1, 2, 3, 4, 5].filter((n) => at(n).pressed);
     const fingersPlaying = playing.filter((n) => n !== 1);
-    // Centre the hand on the playing fingers (or where the planner rests it).
-    const centreX = playing.length
+    // Centre the hand on the playing fingers (or where the planner rests it)...
+    let centreX = playing.length
       ? playing.reduce((sum, n) => sum + at(n).x - natural[n - 1]!, 0) / playing.length
       : [2, 3, 4, 5].reduce((sum, n) => sum + at(n).x, 0) / 4;
-    const refZ = fingersPlaying.length ? fingersPlaying.reduce((sum, n) => sum + keyZ(at(n)), 0) / fingersPlaying.length : 0.66 * H;
+    let refZ = fingersPlaying.length ? fingersPlaying.reduce((sum, n) => sum + keyZ(at(n)), 0) / fingersPlaying.length : 0.66 * H;
+    // ...but a real hand stays put while its fingers can reach from where it is: between notes it
+    // does not drift back to a resting spot, and nearby notes are reached by the fingers alone.
+    const key = WHITE_KEY_M * s;
+    const prev = rig.target;
+    if (prev) {
+      const prevX = prev.knuckles.x;
+      const reachable = playing.every((n) => Math.abs(at(n).x - (prevX + natural[n - 1]!)) < (n === 1 ? 0.8 : 0.6) * key);
+      if (playing.length ? reachable : Math.abs(centreX - prevX) < 2.5 * key) centreX = prevX;
+      if (!fingersPlaying.length) refZ = prev.refZ;
+    }
     const knuckles = new THREE.Vector3(centreX, KNUCKLE_HEIGHT * s, Math.min(refZ + KNUCKLE_REACH * s, H + 0.06 * s));
     // Over the black keys, resting fingers hover above them rather than sinking into them.
     const hover = (HOVER + (refZ < 0.6 * H ? BLACK_KEY_HEIGHT : 0)) * s;
@@ -378,7 +392,7 @@ export class Hands3D {
       }
     }
     const pressedFingers = [1, 2, 3, 4, 5].map((n) => at(n).pressed);
-    return { knuckles, tips, pressed: pressedFingers, activity: input.active ? 1 : 0 };
+    return { knuckles, tips, pressed: pressedFingers, refZ, activity: input.active ? 1 : 0 };
   }
 
   private requestFrame(): void {
@@ -405,7 +419,9 @@ export class Hands3D {
         // Pressing and lifting (height) is quicker than travelling.
         const press = 1 - Math.exp(-dt / PRESS);
         const before = c.knuckles.clone();
-        c.knuckles.lerp(t.knuckles, k);
+        // A leap across the keyboard is made quickly; small shifts are unhurried.
+        const leap = Math.abs(t.knuckles.x - c.knuckles.x) > 3 * WHITE_KEY_M * this.scale;
+        c.knuckles.lerp(t.knuckles, leap ? 1 - Math.exp(-dt / LEAP_GLIDE) : k);
         c.tips.forEach((tip, i) => {
           const rel = tip.clone().sub(before);
           const goal = t.tips[i]!.clone().sub(t.knuckles);
