@@ -28,13 +28,19 @@ const VIEW_SLANT = 0.5;
 /** Where fingertips play, as a share of the keyboard's height from the top; black keys end at BLACK_END. */
 const BLACK_PLAY = 0.54;
 const WHITE_PLAY = 0.78;
+const WHITE_NEAR_BLACK = 0.67;
 const BLACK_END = 0.62;
 /** A finger reaches at most this share of its full length (fully straight is not natural). */
 const REACH_LIMIT = 0.95;
+/** Furthest a finger spreads sideways from straight ahead, and the thumb, in radians. */
+const FINGER_SPREAD = 0.44;
+const THUMB_SPREAD = 1.2;
 /** A playing finger folds back if its key is closer than this share of its reach. */
 const FOLD_LIMIT = 0.6;
 /** Least height of a playing finger's base joint above its fingertip, in metres. */
 const BASE_CLEARANCE = 0.012;
+/** The thumb lies almost flat on its key, so its base needs barely any height. */
+const THUMB_CLEARANCE = 0.002;
 /** Time constant of the hands' movement between poses, in seconds. */
 const GLIDE = 0.09;
 /** Time constant of a quick leap to a far part of the keyboard. */
@@ -103,6 +109,8 @@ const HAND_MODELS: Record<HandModelId, HandModel> = {
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
+/** Colour of the shirt sleeve the hands come out of. */
+const SLEEVE = 0x2f3747;
 
 type Pose = {
   /** Mean knuckle position of the four fingers, in keyboard pixels (x across, y up, z down the screen). */
@@ -125,9 +133,8 @@ type Rig = {
   /** Places the model on the keyboard (its matrix is set directly: it may mirror the model). */
   root: THREE.Object3D;
   chains: Chains;
-  materials: THREE.MeshStandardMaterial[];
-  /** Base colour the resting/playing shading multiplies. */
-  tint: THREE.Color;
+  /** Skin materials and their own colours (a resting hand is drawn slightly dimmer). */
+  materials: { material: THREE.MeshStandardMaterial; base: THREE.Color }[];
   bones: Map<string, THREE.Object3D>;
   rest: Map<THREE.Object3D, Rest>;
   /** Rest-pose bone frames (forward along the bone, back of the hand up), in model space. */
@@ -163,7 +170,7 @@ const RELAXED_BEND = 0.15;
 /** The thumb bends across toward the palm, not straight down: its bending plane leans this far (radians). */
 const THUMB_TILT = 1.0;
 /** How far the thumb's base joint can swing out toward a far key, in metres. */
-const THUMB_SWING = 0.015;
+const THUMB_SWING = 0.008;
 
 /**
  * Bend one digit so its tip lands on `target`: the base joint stays put, the digit turns toward
@@ -381,7 +388,9 @@ export class Hands3D {
     const at = (n: number) => byFinger.get(n as 1 | 2 | 3 | 4 | 5)!;
     // Where on a key the fingertip plays, as pianists do: black keys near their front end, white
     // keys in the part in front of the black keys.
-    const keyZ = (t: FingerTarget) => (t.onBlack ? BLACK_PLAY : WHITE_PLAY) * H;
+    // When the hand also plays black keys, white keys are played further up, just in front of them.
+    const amongBlack = input.fingers.some((t) => t.pressed && t.onBlack);
+    const keyZ = (t: FingerTarget) => (t.onBlack ? BLACK_PLAY : amongBlack ? WHITE_NEAR_BLACK : WHITE_PLAY) * H;
     // Where each fingertip falls, sideways from the knuckles' centre, in a relaxed hand.
     const natural = rig.naturalX.map((x) => x * k);
 
@@ -407,9 +416,11 @@ export class Hands3D {
     const hover = (HOVER + (refZ < BLACK_END * H ? BLACK_KEY_HEIGHT : 0)) * s;
 
     // Where the playing fingertips go: on their keys (the thumb on the front of its key).
+    // A finger can also play further up its key (between the black keys) when the hand is there.
+    const upKey = new Map<number, number>();
     const keyTip = (n: number) => {
       const t = at(n);
-      const z = n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t);
+      const z = upKey.get(n) ?? (n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t));
       return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
     };
     // No cheating: every playing finger must really reach its key. If one cannot from here (a
@@ -419,13 +430,36 @@ export class Hands3D {
       for (const n of playing) {
         const tip = keyTip(n);
         // A finger presses down onto its key: its base joint must sit above the key.
-        const lift = tip.y + BASE_CLEARANCE * s - (knuckles.y + rig.knuckleOffset[n - 1]!.y * k);
+        const lift = tip.y + (n === 1 ? THUMB_CLEARANCE : BASE_CLEARANCE) * s - (knuckles.y + rig.knuckleOffset[n - 1]!.y * k);
         if (lift > 0) knuckles.y += lift;
-        const base = knuckles.clone().add(rig.knuckleOffset[n - 1]!.clone().multiplyScalar(k));
+      }
+      // Across the keys: a finger spreads sideways only so far from its knuckle (about 25°; the
+      // thumb much further), so each playing finger allows a band of hand positions. Stay in all
+      // of them; if they do not meet (a wide stretch), split the difference, the thumb giving way
+      // first since it opens widest.
+      let left = -Infinity;
+      let right = Infinity;
+      let fingersLeft = -Infinity;
+      let fingersRight = Infinity;
+      for (const n of playing) {
+        const tip = keyTip(n);
+        const offset = rig.knuckleOffset[n - 1]!.clone().multiplyScalar(k);
         const length = rig.fingerLength[n - 1]! * k * REACH_LIMIT;
-        const flat = Math.sqrt(Math.max(0, length * length - (base.y - tip.y) ** 2));
-        const across = tip.x - base.x;
-        if (Math.abs(across) > 0.8 * flat) knuckles.x += across - Math.sign(across) * 0.8 * flat;
+        const flat = Math.sqrt(Math.max(0, length * length - (knuckles.y + offset.y - tip.y) ** 2));
+        const spread = flat * Math.sin(n === 1 ? THUMB_SPREAD : FINGER_SPREAD);
+        const lo = tip.x - offset.x - spread;
+        const hi = tip.x - offset.x + spread;
+        left = Math.max(left, lo);
+        right = Math.min(right, hi);
+        if (n !== 1) {
+          fingersLeft = Math.max(fingersLeft, lo);
+          fingersRight = Math.min(fingersRight, hi);
+        }
+      }
+      if (playing.length) {
+        if (left <= right) knuckles.x = Math.min(Math.max(knuckles.x, left), right);
+        else if (fingersLeft <= fingersRight) knuckles.x = Math.min(Math.max((left + right) / 2, fingersLeft), fingersRight);
+        else knuckles.x = (fingersLeft + fingersRight) / 2;
       }
       // Up and down the keys: each playing finger allows a band of hand positions, between
       // reaching its key at full stretch and being so close it must fold back. Stay in every
@@ -443,6 +477,21 @@ export class Hands3D {
       }
       if (knuckles.z > farthest) knuckles.z = farthest;
       else if (knuckles.z < nearest) knuckles.z = Math.min(nearest, farthest);
+    }
+
+    // A finger whose key point now lies under or behind its knuckle would have to fold back; it
+    // plays further up the key instead, the way a hand that has moved in over the black keys does.
+    for (const n of playing) {
+      if (n === 1) continue;
+      const tip = keyTip(n);
+      const offset = rig.knuckleOffset[n - 1]!.clone().multiplyScalar(k);
+      const length = rig.fingerLength[n - 1]! * k * REACH_LIMIT;
+      const flat = Math.sqrt(Math.max(0, length * length - (knuckles.y + offset.y - tip.y) ** 2));
+      const baseZ = knuckles.z + offset.z;
+      if (baseZ - tip.z < FOLD_LIMIT * flat) {
+        const top = (at(n).onBlack ? 0.08 : 0.04) * H;
+        upKey.set(n, Math.max(top, Math.min(tip.z, baseZ - 0.8 * flat)));
+      }
     }
 
     const tips = [1, 2, 3, 4, 5].map((n) => {
@@ -531,7 +580,7 @@ export class Hands3D {
     );
     rig.root.matrixWorldNeedsUpdate = true;
     // A resting hand is a touch dimmer than a playing one (kept opaque: see-through skin looks ghostly).
-    for (const material of rig.materials) material.color.copy(rig.tint).multiplyScalar(0.86 + 0.14 * pose.activity);
+    for (const { material, base } of rig.materials) material.color.copy(base).multiplyScalar(0.86 + 0.14 * pose.activity);
 
     const toModel = (p: THREE.Vector3) => p.clone().sub(origin).divideScalar(k).applyMatrix3(rig.fromWorld);
     const toWorld = (p: THREE.Vector3) => p.clone().applyMatrix3(rig.toWorld).multiplyScalar(k).add(origin);
@@ -582,7 +631,7 @@ export class Hands3D {
       rig.target.tips.forEach((_, i) => {
         if (!rig.target!.pressed[i]) return;
         const now = rig.current!.tips[i]!;
-        out.push({ side: rig.side, finger: i + 1, x: now.x, y: now.z + 0.022 * s });
+        out.push({ side: rig.side, finger: i + 1, x: now.x, y: Math.min(now.z + 0.022 * s, this.height - 0.011 * s) });
       });
     }
     return out;
@@ -612,6 +661,60 @@ function skinMaterial(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMat
     sheenColor: new THREE.Color(0xff9a80),
     sheenRoughness: 0.55,
   });
+}
+
+/**
+ * A sleeve continuing the hand model from its wrist (the model ends there): a soft fabric tube a
+ * little wider than the wrist, reaching well past the keyboard's front edge, so the hand never
+ * looks cut off when it moves up the keys.
+ */
+function buildSleeve(
+  scene: THREE.Object3D,
+  knuckleCentre: THREE.Vector3,
+  forward: THREE.Vector3,
+  littleward: THREE.Vector3,
+  back: THREE.Vector3,
+): THREE.Mesh | null {
+  // Skin vertices in model space; the wrist is where they end, furthest back from the fingers.
+  const points: THREE.Vector3[] = [];
+  scene.traverse((node) => {
+    const mesh = node as THREE.SkinnedMesh;
+    if (!mesh.isSkinnedMesh) return;
+    const position = mesh.geometry.getAttribute("position");
+    for (let i = 0; i < position.count; i++) points.push(new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld));
+  });
+  if (!points.length) return null;
+  const along = (p: THREE.Vector3) => p.clone().sub(knuckleCentre).dot(forward);
+  const end = Math.min(...points.map(along));
+  const length = Math.max(...points.map(along)) - end;
+  const rim = points.filter((p) => along(p) < end + length * 0.04);
+  const centre = rim.reduce((sum, p) => sum.add(p), new THREE.Vector3()).divideScalar(rim.length);
+  const radius = (axis: THREE.Vector3) => Math.max(...rim.map((p) => Math.abs(p.clone().sub(centre).dot(axis))));
+  const width = radius(littleward);
+  const depth = radius(back);
+  // Unit tube from y = 0 (the cuff, at the wrist) to y = −1, widening slightly.
+  const geometry = new THREE.CylinderGeometry(1, 1.1, 1, 32, 1, true).translate(0, -0.5, 0);
+  const material = new THREE.MeshPhysicalMaterial({
+    color: SLEEVE,
+    roughness: 0.9,
+    metalness: 0,
+    sheen: 0.6,
+    sheenColor: new THREE.Color(0x8090b0),
+    sheenRoughness: 0.8,
+    side: THREE.DoubleSide,
+  });
+  const arm = new THREE.Mesh(geometry, material);
+  arm.matrixAutoUpdate = false;
+  // The cuff sits just over the end of the wrist, a little wider than it.
+  const start = centre.clone().addScaledVector(forward, length * 0.04);
+  arm.matrix.makeBasis(
+    littleward.clone().multiplyScalar(width * 1.18),
+    forward.clone().multiplyScalar(length * 2.5),
+    back.clone().multiplyScalar(depth * 1.25),
+  );
+  arm.matrix.setPosition(start);
+  arm.castShadow = true;
+  return arm;
 }
 
 function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandModel): Rig {
@@ -690,6 +793,9 @@ function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandMo
   const knuckleOffset = chains.map((names) => at(names[0]!).clone().sub(knuckleCentre).applyMatrix3(toWorld));
   const fingerLength = chains.map((names) => [0, 1, 2].reduce((sum, j) => sum + at(names[j]!).distanceTo(at(names[j + 1]!)), 0));
 
+  const sleeve = buildSleeve(scene, knuckleCentre, forward, littleward, back);
+  if (sleeve) scene.add(sleeve);
+
   const root = new THREE.Group();
   root.matrixAutoUpdate = false;
   root.add(scene);
@@ -697,8 +803,7 @@ function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandMo
     side,
     root,
     chains,
-    materials,
-    tint: materials[0]?.color.clone() ?? new THREE.Color(0xffffff),
+    materials: materials.map((material) => ({ material, base: material.color.clone() })),
     bones,
     rest,
     restFrame,
