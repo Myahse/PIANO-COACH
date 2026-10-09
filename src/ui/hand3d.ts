@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { HandSide } from "./fingering";
 import type { FingerTarget } from "./handArt";
 
@@ -18,6 +19,12 @@ const KEY_DIP = 0.004;
 const HOVER = 0.012;
 /** How far back from the fingertips the knuckles sit when the hand is curved over the keys. */
 const KNUCKLE_REACH = 0.05;
+/**
+ * The hands are drawn as a player sees them, from in front and above rather than straight down:
+ * anything above the keys shifts up the screen by this much per unit of height, so the back of
+ * the hand shows over the keys. The keys' surface itself stays exactly where it is on screen.
+ */
+const VIEW_SLANT = 0.5;
 /** Time constant of the hands' movement between poses, in seconds. */
 const GLIDE = 0.055;
 
@@ -215,8 +222,20 @@ export class Hands3D {
     this.rigs = rigs;
 
     this.camera.up.set(0, 0, -1);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a6a58, 1.5));
-    this.light = new THREE.DirectionalLight(0xfff4ea, 2.2);
+    // Soft studio reflections, a low ambient fill, a key light from above-left that rakes across
+    // the skin (bringing out knuckles and veins), and a warm back light for the glow at the edges
+    // of skin that light shines through.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.6;
+    pmrem.dispose();
+    this.scene.add(new THREE.HemisphereLight(0xfff6ee, 0x7a5040, 0.35));
+    const rake = new THREE.DirectionalLight(0xfff4ec, 1.9);
+    rake.position.set(-0.8, 0.55, -0.45);
+    const rim = new THREE.DirectionalLight(0xffa080, 0.55);
+    rim.position.set(0.2, 0.25, 1);
+    this.scene.add(rake, rim);
+    this.light = new THREE.DirectionalLight(0xfff4ea, 1.5);
     this.light.castShadow = true;
     this.light.shadow.mapSize.set(2048, 1024);
     this.light.shadow.radius = 4;
@@ -237,8 +256,8 @@ export class Hands3D {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.05;
+      renderer.toneMapping = THREE.NeutralToneMapping;
+      renderer.toneMappingExposure = 1;
       const base = import.meta.env.BASE_URL ?? "/";
       const loader = new GLTFLoader();
       const model = HAND_MODELS[modelId];
@@ -262,7 +281,12 @@ export class Hands3D {
     Object.assign(this.camera, { left: 0, right: width, top: 0, bottom: -height });
     this.camera.position.set(0, 4000, 0);
     this.camera.lookAt(0, 0, 0);
+    this.camera.updateMatrixWorld();
     this.camera.updateProjectionMatrix();
+    // Slant the view: a world shear z' = z − VIEW_SLANT·y folded into the projection.
+    const shear = new THREE.Matrix4().set(1, 0, 0, 0, 0, 1, 0, 0, 0, -VIEW_SLANT, 1, 0, 0, 0, 0, 1);
+    this.camera.projectionMatrix.multiply(this.camera.matrixWorldInverse).multiply(shear).multiply(this.camera.matrixWorld);
+    this.camera.projectionMatrixInverse.copy(this.camera.projectionMatrix).invert();
 
     this.shadowCatcher.scale.set(width * 1.5, height * 3, 1);
     this.shadowCatcher.position.set(width / 2, 0, height / 2);
@@ -422,6 +446,27 @@ function clonePose(pose: Pose): Pose {
   return { ...pose, knuckles: pose.knuckles.clone(), tips: pose.tips.map((t) => t.clone()) };
 }
 
+/**
+ * A textured skin: the model's own colour, normal and roughness maps on a physical material with a
+ * warm sheen, which reads like the reddish glow of light scattering through skin at its edges.
+ */
+function skinMaterial(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
+  return new THREE.MeshPhysicalMaterial({
+    map: source.map,
+    normalMap: source.normalMap,
+    normalScale: source.normalScale.clone().multiplyScalar(1.4),
+    roughnessMap: source.roughnessMap,
+    metalnessMap: source.metalnessMap,
+    aoMap: source.aoMap,
+    roughness: source.roughness,
+    metalness: 0,
+    color: source.color,
+    sheen: 0.3,
+    sheenColor: new THREE.Color(0xff9a80),
+    sheenRoughness: 0.55,
+  });
+}
+
 function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandModel): Rig {
   const scene = gltf.scene;
   scene.updateMatrixWorld(true);
@@ -434,6 +479,7 @@ function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandMo
     if ((node as THREE.SkinnedMesh).isSkinnedMesh) {
       const mesh = node as THREE.SkinnedMesh;
       if (skin) mesh.material = skin;
+      else mesh.material = [mesh.material].flat().map((m) => (m instanceof THREE.MeshStandardMaterial ? skinMaterial(m) : m))[0]!;
       for (const material of [mesh.material].flat()) {
         if (material instanceof THREE.MeshStandardMaterial && !materials.includes(material)) materials.push(material);
       }
