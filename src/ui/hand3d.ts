@@ -13,14 +13,12 @@ export type FingerBadge = { side: HandSide; finger: number; x: number; y: number
 /** A real white key is 23.5 mm wide: the hands are drawn to scale with the keys. */
 const WHITE_KEY_M = 0.0235;
 /** Heights above the white keys' surface, in metres. */
-const KNUCKLE_HEIGHT = 0.046;
+const KNUCKLE_HEIGHT = 0.03;
 const BLACK_KEY_HEIGHT = 0.012;
 const KEY_DIP = 0.004;
 const HOVER = 0.012;
 /** How far back from the fingertips the knuckles sit when the hand is curved over the keys. */
-const KNUCKLE_REACH = 0.032;
-/** How much further up the keys a resting fingertip lies than a playing one. */
-const REST_EXTEND = 0.012;
+const KNUCKLE_REACH = 0.068;
 /**
  * The hands are drawn as a player sees them, from in front and above rather than straight down:
  * anything above the keys shifts up the screen by this much per unit of height, so the back of
@@ -151,6 +149,9 @@ function frame(forward: THREE.Vector3, up: THREE.Vector3): THREE.Quaternion {
  * the target and its joints flex in a natural curve (the end joint follows the middle one, as
  * in a real finger). Returns the joint positions, knuckle → tip.
  */
+/** The slight bend (radians) at the middle joint of a relaxed, nearly straight finger. */
+const RELAXED_BEND = 0.15;
+
 export function bendFinger(base: THREE.Vector3, target: THREE.Vector3, lengths: number[]): THREE.Vector3[] {
   const flat = new THREE.Vector3(target.x - base.x, 0, target.z - base.z);
   const r = flat.length();
@@ -167,10 +168,11 @@ export function bendFinger(base: THREE.Vector3, target: THREE.Vector3, lengths: 
     });
     return { x, y, angles };
   };
+  // Fingers lie nearly straight, with only the slight bend of a relaxed finger: the finger tilts
+  // down at the knuckle to reach the key rather than curling.
   const cost = (a: number, b: number) => {
     const t = tipAt(a, b);
-    // Reach the target; among ways to do it, prefer a pianist's rounded finger.
-    return ((t.x - r) ** 2 + (t.y - h) ** 2) / (total * total) + 0.003 * (b - (0.9 * a + 0.35)) ** 2;
+    return ((t.x - r) ** 2 + (t.y - h) ** 2) / (total * total) + 0.003 * (b - RELAXED_BEND) ** 2;
   };
   let best = { a: 0.3, b: 0.6, c: Infinity };
   for (let i = 0; i <= 20; i++) {
@@ -376,8 +378,7 @@ export class Hands3D {
         const z = n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t);
         return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
       }
-      // A resting finger hangs a little further out than a playing one: relaxed, not clawed.
-      return new THREE.Vector3(centreX + natural[n - 1]!, hover, refZ + (shorter - REST_EXTEND) * s);
+      return new THREE.Vector3(centreX + natural[n - 1]!, hover, refZ + shorter * s);
     });
     // Fingers never cross: a resting finger stays between its neighbours (thumb → little finger
     // run left → right on the right hand, right → left on the left hand).
