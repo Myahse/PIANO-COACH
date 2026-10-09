@@ -168,11 +168,13 @@ function frame(forward: THREE.Vector3, up: THREE.Vector3): THREE.Quaternion {
 /** The slight bend (radians) at the middle joint of a relaxed, nearly straight finger. */
 const RELAXED_BEND = 0.15;
 /** The thumb bends across toward the palm, not straight down: its bending plane leans this far (radians). */
-const THUMB_TILT = 1.0;
+const THUMB_TILT = 1.35;
 /** How far the thumb's base joint can swing out toward a far key, in metres. */
 const THUMB_SWING = 0.008;
-/** How much nearer the player than the fingertips the thumb plays, in metres. */
-const THUMB_BEHIND = 0.02;
+/** How far back from the fingertip, along the finger, its number badge sits, in metres. */
+const BADGE_BACK = 0.014;
+/** How far the playing thumb extends from its base, as a share of its length. */
+const THUMB_EXTENSION = 0.93;
 
 /**
  * Bend one digit so its tip lands on `target`: the base joint stays put, the digit turns toward
@@ -422,10 +424,19 @@ export class Hands3D {
     const upKey = new Map<number, number>();
     const keyTip = (n: number) => {
       const t = at(n);
-      // The thumb plays a little nearer the player than the fingertips, pointing diagonally
-      // forward; anywhere along its key's open surface.
-      const thumbZ = () =>
-        Math.min(Math.max(refZ + THUMB_BEHIND * s, (t.onBlack ? 0.08 : 0.04) * H), (t.onBlack ? BLACK_END - 0.03 : 0.95) * H);
+      // The thumb plays where it naturally reaches from the hand, wherever the hand is: when the
+      // hand moves up the keys, the thumb moves up its key with it (between the black keys)
+      // instead of reaching back down to the key's front.
+      const thumbZ = () => {
+        // The spot on the key where the thumb is comfortably extended from its base (not curled
+        // up short, not at full stretch), reaching diagonally forward.
+        const offset = rig.knuckleOffset[0]!;
+        const length = rig.fingerLength[0]! * k * THUMB_EXTENSION;
+        const flat = Math.sqrt(Math.max(0, length * length - (knuckles.y + offset.y * k - BLACK_KEY_HEIGHT * s * (t.onBlack ? 1 : 0)) ** 2));
+        const across = t.x - (knuckles.x + offset.x * k);
+        const z = knuckles.z + offset.z * k - Math.sqrt(Math.max(0, flat * flat - across * across));
+        return Math.min(Math.max(z, (t.onBlack ? 0.08 : 0.04) * H), (t.onBlack ? BLACK_END - 0.03 : 0.95) * H);
+      };
       const z = upKey.get(n) ?? (n === 1 ? thumbZ() : keyZ(t));
       return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
     };
@@ -632,12 +643,19 @@ export class Hands3D {
   private badges(): FingerBadge[] {
     const out: FingerBadge[] = [];
     const s = this.scale;
+    const tip = new THREE.Vector3();
+    const joint = new THREE.Vector3();
     for (const rig of Object.values(this.rigs)) {
       if (!rig.visible || !rig.target || !rig.current) continue;
-      rig.target.tips.forEach((_, i) => {
+      rig.root.updateMatrixWorld(true);
+      rig.chains.forEach((names, i) => {
         if (!rig.target!.pressed[i]) return;
-        const now = rig.current!.tips[i]!;
-        out.push({ side: rig.side, finger: i + 1, x: now.x, y: Math.min(now.z + 0.022 * s, this.height - 0.011 * s) });
+        // On the finger itself, just back from the tip along the finger, where it shows on screen.
+        tip.setFromMatrixPosition(rig.bones.get(names[3]!)!.matrixWorld);
+        joint.setFromMatrixPosition(rig.bones.get(names[2]!)!.matrixWorld);
+        const spot = tip.clone().add(joint.sub(tip).setLength(BADGE_BACK * s));
+        const y = spot.z - VIEW_SLANT * spot.y;
+        out.push({ side: rig.side, finger: i + 1, x: spot.x, y: Math.min(y, this.height - 0.011 * s) });
       });
     }
     return out;
