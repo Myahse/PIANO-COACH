@@ -32,8 +32,8 @@ const WHITE_NEAR_BLACK = 0.67;
 const BLACK_END = 0.62;
 /** A finger reaches at most this share of its full length (fully straight is not natural). */
 const REACH_LIMIT = 0.95;
-/** Furthest a finger spreads sideways from straight ahead, and the thumb, in radians. */
-const FINGER_SPREAD = 0.44;
+/** Furthest a finger spreads sideways from straight ahead (about 30°), and the thumb, in radians. */
+const FINGER_SPREAD = 0.55;
 const THUMB_SPREAD = 1.2;
 /** A playing finger folds back if its key is closer than this share of its reach. */
 const FOLD_LIMIT = 0.6;
@@ -48,8 +48,8 @@ const LEAP_GLIDE = 0.045;
 /** Time constant of a finger pressing or lifting off a key. */
 const PRESS = 0.03;
 
-/** Real distance from the index knuckle to the little-finger knuckle, used to size any model. */
-const KNUCKLE_SPAN_M = 0.0586;
+/** Distance from the index knuckle to the little-finger knuckle of an average adult hand, used to size any model. */
+const KNUCKLE_SPAN_M = 0.064;
 
 /** Which hand model to draw. */
 export type HandModelId = "webxr" | "game" | "natural";
@@ -171,6 +171,8 @@ const RELAXED_BEND = 0.15;
 const THUMB_TILT = 1.0;
 /** How far the thumb's base joint can swing out toward a far key, in metres. */
 const THUMB_SWING = 0.008;
+/** How much nearer the player than the fingertips the thumb plays, in metres. */
+const THUMB_BEHIND = 0.02;
 
 /**
  * Bend one digit so its tip lands on `target`: the base joint stays put, the digit turns toward
@@ -420,7 +422,11 @@ export class Hands3D {
     const upKey = new Map<number, number>();
     const keyTip = (n: number) => {
       const t = at(n);
-      const z = upKey.get(n) ?? (n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t));
+      // The thumb plays a little nearer the player than the fingertips, pointing diagonally
+      // forward; anywhere along its key's open surface.
+      const thumbZ = () =>
+        Math.min(Math.max(refZ + THUMB_BEHIND * s, (t.onBlack ? 0.08 : 0.04) * H), (t.onBlack ? BLACK_END - 0.03 : 0.95) * H);
+      const z = upKey.get(n) ?? (n === 1 ? thumbZ() : keyZ(t));
       return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
     };
     // No cheating: every playing finger must really reach its key. If one cannot from here (a
