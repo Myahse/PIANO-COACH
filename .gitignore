@@ -29,3 +29,6 @@ venv
 # Logs
 *.log
 npm-debug.log*
+
+# Sketchfab-licensed hand model: not redistributable, kept out of the public repo
+public/models/hands/game/

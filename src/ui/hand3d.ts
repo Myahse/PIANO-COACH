@@ -21,17 +21,55 @@ const KNUCKLE_REACH = 0.05;
 /** Time constant of the hands' movement between poses, in seconds. */
 const GLIDE = 0.055;
 
-const DIGITS = ["thumb", "index-finger", "middle-finger", "ring-finger", "pinky-finger"] as const;
-const CHAIN: Record<(typeof DIGITS)[number], string[]> = {
-  thumb: ["thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phalanx-distal", "thumb-tip"],
-  "index-finger": ["index-finger-phalanx-proximal", "index-finger-phalanx-intermediate", "index-finger-phalanx-distal", "index-finger-tip"],
-  "middle-finger": ["middle-finger-phalanx-proximal", "middle-finger-phalanx-intermediate", "middle-finger-phalanx-distal", "middle-finger-tip"],
-  "ring-finger": ["ring-finger-phalanx-proximal", "ring-finger-phalanx-intermediate", "ring-finger-phalanx-distal", "ring-finger-tip"],
-  "pinky-finger": ["pinky-finger-phalanx-proximal", "pinky-finger-phalanx-intermediate", "pinky-finger-phalanx-distal", "pinky-finger-tip"],
+/** Real distance from the index knuckle to the little-finger knuckle, used to size any model. */
+const KNUCKLE_SPAN_M = 0.0586;
+
+/** Which hand model to draw. */
+export type HandModelId = "webxr" | "game";
+
+type HandModel = {
+  /** Model file for each hand; one file can serve both (it is mirrored for the other hand). */
+  files: Record<HandSide, string>;
+  /** Which hand each file shows. */
+  shows: Record<HandSide, HandSide>;
+  /** Joint names along each digit, thumb → little finger, from the joint the digit bends at to the tip. */
+  chains: Chains;
+  /** Paint the model in this skin tone (for untextured models); otherwise keep its own skin textures. */
+  skin?: number;
+};
+type Chains = string[][];
+
+const HAND_MODELS: Record<HandModelId, HandModel> = {
+  // WebXR Input Profiles "generic-hand" (MIT): untextured, one file per hand.
+  webxr: {
+    files: { left: "models/hands/left.glb", right: "models/hands/right.glb" },
+    shows: { left: "left", right: "right" },
+    chains: [
+      ["thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phalanx-distal", "thumb-tip"],
+      ...["index-finger", "middle-finger", "ring-finger", "pinky-finger"].map((d) => [
+        `${d}-phalanx-proximal`,
+        `${d}-phalanx-intermediate`,
+        `${d}-phalanx-distal`,
+        `${d}-tip`,
+      ]),
+    ],
+    skin: 0xe9b796,
+  },
+  // "Rigged hand - Game model" by Lorenzo Drago (Sketchfab): textured skin, one right hand.
+  game: {
+    files: { left: "models/hands/game/hand.glb", right: "models/hands/game/hand.glb" },
+    shows: { left: "right", right: "right" },
+    chains: [
+      ["Bone.003_014", "Bone.004_015", "Bone.005_016", "Bone.005_end_021"],
+      ["Bone.009_02", "Bone.010_03", "Bone.011_04", "Bone.011_end_017"],
+      ["Bone.012_05", "Bone.013_06", "Bone.014_07", "Bone.014_end_018"],
+      ["Bone.015_08", "Bone.016_09", "Bone.017_010", "Bone.017_end_019"],
+      ["Bone.018_011", "Bone.019_012", "Bone.020_013", "Bone.020_end_020"],
+    ],
+  },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
-const SKIN = 0xe9b796;
 
 type Pose = {
   /** Mean knuckle position of the four fingers, in keyboard pixels (x across, y up, z down the screen). */
@@ -44,18 +82,26 @@ type Pose = {
   activity: number;
 };
 
+/** A bone's rest pose in model space (the loaded file's own coordinates). */
+type Rest = { matrix: THREE.Matrix4; pos: THREE.Vector3; quat: THREE.Quaternion; scale: THREE.Vector3 };
+
 type Rig = {
   side: HandSide;
+  /** Places the model on the keyboard (its matrix is set directly: it may mirror the model). */
   root: THREE.Object3D;
-  material: THREE.MeshStandardMaterial;
+  chains: Chains;
+  materials: THREE.MeshStandardMaterial[];
+  /** Base colour the resting/playing shading multiplies. */
+  tint: THREE.Color;
   bones: Map<string, THREE.Object3D>;
-  restPos: Map<string, THREE.Vector3>;
-  restQuat: Map<string, THREE.Quaternion>;
+  rest: Map<THREE.Object3D, Rest>;
   /** Rest-pose bone frames (forward along the bone, back of the hand up), in model space. */
   restFrame: Map<string, THREE.Quaternion>;
-  /** Model → keyboard rotation: fingers point up the screen, back of the hand toward the viewer. */
-  toWorld: THREE.Quaternion;
-  fromWorld: THREE.Quaternion;
+  /** Model → keyboard axes: fingers up the screen, back of the hand toward the viewer. */
+  toWorld: THREE.Matrix3;
+  fromWorld: THREE.Matrix3;
+  /** Metres per model unit. */
+  unit: number;
   /** Mean rest position of the four knuckles, in model space. */
   knuckleCentre: THREE.Vector3;
   current: Pose | null;
@@ -171,7 +217,7 @@ export class Hands3D {
   }
 
   /** Load the hand models and set up WebGL; null if this device cannot draw them. */
-  static async create(): Promise<Hands3D | null> {
+  static async create(modelId: HandModelId = "webxr"): Promise<Hands3D | null> {
     try {
       const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, premultipliedAlpha: true });
       renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -183,8 +229,9 @@ export class Hands3D {
       renderer.toneMappingExposure = 1.05;
       const base = import.meta.env.BASE_URL ?? "/";
       const loader = new GLTFLoader();
+      const model = HAND_MODELS[modelId];
       const [left, right] = await Promise.all(
-        (["left", "right"] as const).map(async (side) => buildRig(side, await loader.loadAsync(`${base}models/hands/${side}.glb`))),
+        (["left", "right"] as const).map(async (side) => buildRig(side, await loader.loadAsync(`${base}${model.files[side]}`), model)),
       );
       return new Hands3D(renderer, { left: left!, right: right! });
     } catch (error) {
@@ -299,37 +346,46 @@ export class Hands3D {
 
   /** Pose the bones: place the hand, then bend each finger onto its fingertip target. */
   private applyPose(rig: Rig, pose: Pose): void {
-    const s = this.scale;
+    const k = this.scale * rig.unit; // keyboard pixels per model unit
     // Hand placement: knuckles where the pose wants them.
-    const offset = rig.knuckleCentre.clone().applyQuaternion(rig.toWorld).multiplyScalar(s);
-    rig.root.position.copy(pose.knuckles).sub(offset);
-    rig.root.quaternion.copy(rig.toWorld);
-    rig.root.scale.setScalar(s);
+    const origin = pose.knuckles.clone().sub(rig.knuckleCentre.clone().applyMatrix3(rig.toWorld).multiplyScalar(k));
+    const e = rig.toWorld.elements;
+    rig.root.matrix.set(
+      e[0]! * k, e[3]! * k, e[6]! * k, origin.x,
+      e[1]! * k, e[4]! * k, e[7]! * k, origin.y,
+      e[2]! * k, e[5]! * k, e[8]! * k, origin.z,
+      0, 0, 0, 1,
+    );
+    rig.root.matrixWorldNeedsUpdate = true;
     // A resting hand is a touch dimmer than a playing one (kept opaque: see-through skin looks ghostly).
-    rig.material.color.setHex(SKIN).multiplyScalar(0.86 + 0.14 * pose.activity);
+    for (const material of rig.materials) material.color.copy(rig.tint).multiplyScalar(0.86 + 0.14 * pose.activity);
 
-    const toModel = (p: THREE.Vector3) => p.clone().sub(rig.root.position).divideScalar(s).applyQuaternion(rig.fromWorld);
-    const toWorld = (p: THREE.Vector3) => p.clone().applyQuaternion(rig.toWorld).multiplyScalar(s).add(rig.root.position);
+    const toModel = (p: THREE.Vector3) => p.clone().sub(origin).divideScalar(k).applyMatrix3(rig.fromWorld);
+    const toWorld = (p: THREE.Vector3) => p.clone().applyMatrix3(rig.toWorld).multiplyScalar(k).add(origin);
 
-    DIGITS.forEach((digit, i) => {
-      const names = CHAIN[digit];
-      const restPoints = names.map((n) => rig.restPos.get(n)!);
-      const lengths = [0, 1, 2].map((j) => restPoints[j]!.distanceTo(restPoints[j + 1]!) * s);
+    rig.chains.forEach((names, i) => {
+      const bones = names.map((n) => rig.bones.get(n)!);
+      const restPoints = bones.map((bone) => rig.rest.get(bone)!.pos);
+      const lengths = [0, 1, 2].map((j) => restPoints[j]!.distanceTo(restPoints[j + 1]!) * k);
       const points = bendFinger(toWorld(restPoints[0]!), pose.tips[i]!, lengths);
       const heading = new THREE.Vector3(points[3]!.x - points[0]!.x, 0, points[3]!.z - points[0]!.z);
       if (heading.lengthSq() < 1e-9) heading.set(0, 0, -1);
       const lateral = new THREE.Vector3().crossVectors(UP, heading.normalize());
-      names.forEach((name, j) => {
-        const bone = rig.bones.get(name)!;
+      // Each bone's new model-space matrix, set relative to its parent (bones may be nested in a
+      // chain, or all hang off one root).
+      const posed = new Map<THREE.Object3D, THREE.Matrix4>();
+      bones.forEach((bone, j) => {
         const seg = Math.min(j, 2);
         const forward = points[seg + 1]!.clone().sub(points[seg]!).normalize();
         const back = new THREE.Vector3().crossVectors(forward, lateral);
-        // New frame in model space, relative to the bone's rest frame.
-        const fm = forward.clone().applyQuaternion(rig.fromWorld);
-        const bm = back.clone().applyQuaternion(rig.fromWorld);
-        const delta = frame(fm, bm).multiply(rig.restFrame.get(name)!.clone().invert());
-        bone.quaternion.copy(delta.multiply(rig.restQuat.get(name)!));
-        bone.position.copy(toModel(points[j]!));
+        const fm = forward.applyMatrix3(rig.fromWorld);
+        const bm = back.applyMatrix3(rig.fromWorld);
+        const rest = rig.rest.get(bone)!;
+        const delta = frame(fm, bm).multiply(rig.restFrame.get(names[j]!)!.clone().invert());
+        const matrix = new THREE.Matrix4().compose(toModel(points[j]!), delta.multiply(rest.quat), rest.scale);
+        const parent = posed.get(bone.parent!) ?? rig.rest.get(bone.parent!)?.matrix ?? new THREE.Matrix4();
+        new THREE.Matrix4().copy(parent).invert().multiply(matrix).decompose(bone.position, bone.quaternion, bone.scale);
+        posed.set(bone, matrix);
       });
     });
   }
@@ -354,57 +410,90 @@ function clonePose(pose: Pose): Pose {
   return { ...pose, knuckles: pose.knuckles.clone(), tips: pose.tips.map((t) => t.clone()) };
 }
 
-function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }): Rig {
-  const root = gltf.scene;
+function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandModel): Rig {
+  const scene = gltf.scene;
+  scene.updateMatrixWorld(true);
+  const chains = model.chains.map((names) => names.map((n) => THREE.PropertyBinding.sanitizeNodeName(n)));
+  const wanted = new Set(chains.flat());
   const bones = new Map<string, THREE.Object3D>();
-  const restPos = new Map<string, THREE.Vector3>();
-  const restQuat = new Map<string, THREE.Quaternion>();
-  const material = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.58, metalness: 0 });
-  root.traverse((node) => {
+  const materials: THREE.MeshStandardMaterial[] = [];
+  const skin = model.skin !== undefined ? new THREE.MeshStandardMaterial({ color: model.skin, roughness: 0.58, metalness: 0 }) : null;
+  scene.traverse((node) => {
     if ((node as THREE.SkinnedMesh).isSkinnedMesh) {
       const mesh = node as THREE.SkinnedMesh;
-      mesh.material = material;
+      if (skin) mesh.material = skin;
+      for (const material of [mesh.material].flat()) {
+        if (material instanceof THREE.MeshStandardMaterial && !materials.includes(material)) materials.push(material);
+      }
       mesh.castShadow = true;
       mesh.frustumCulled = false;
     }
-    if ((node as THREE.Bone).isBone || /^(wrist|thumb|index|middle|ring|pinky)/.test(node.name)) {
-      bones.set(node.name, node);
-      restPos.set(node.name, node.position.clone());
-      restQuat.set(node.name, node.quaternion.clone());
-    }
+    if (wanted.has(node.name)) bones.set(node.name, node);
   });
-  // The model's back of the hand faces +x (right hand) or −x (left hand, a mirror image);
-  // fingers point along −y and the little finger is toward +z.
-  const back = new THREE.Vector3(side === "right" ? 1 : -1, 0, 0);
+  const missing = [...wanted].filter((name) => !bones.has(name));
+  if (missing.length) throw new Error(`hand model is missing joints: ${missing.join(", ")}`);
+
+  // Rest pose of every bone in the digits (and their parents), in model space.
+  const rest = new Map<THREE.Object3D, Rest>();
+  const remember = (node: THREE.Object3D) => {
+    const matrix = node.matrixWorld.clone();
+    const r: Rest = { matrix, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), scale: new THREE.Vector3() };
+    matrix.decompose(r.pos, r.quat, r.scale);
+    rest.set(node, r);
+  };
+  for (const bone of bones.values()) {
+    remember(bone);
+    if (bone.parent && !rest.has(bone.parent)) remember(bone.parent);
+  }
+  const at = (name: string) => rest.get(bones.get(name)!)!.pos;
+
+  // The model's own axes, from its rest pose: fingers point along `forward`, the little finger
+  // lies toward `littleward`, and the back of the hand faces littleward × forward for a right
+  // hand (the opposite way for a left hand).
+  const [, index, middle, , little] = chains;
+  const forward = at(middle![1]!).clone().sub(at(middle![0]!)).normalize();
+  const littleward = at(little![0]!).clone().sub(at(index![0]!));
+  const span = littleward.length();
+  littleward.addScaledVector(forward, -littleward.dot(forward)).normalize();
+  const back = new THREE.Vector3().crossVectors(littleward, forward);
+  if (model.shows[side] === "left") back.negate();
+
   const restFrame = new Map<string, THREE.Quaternion>();
-  for (const names of Object.values(CHAIN)) {
+  for (const names of chains) {
     names.forEach((name, j) => {
       const seg = Math.min(j, 2);
-      const forward = restPos.get(names[seg + 1]!)!.clone().sub(restPos.get(names[seg]!)!);
-      restFrame.set(name, frame(forward, back));
+      restFrame.set(name, frame(at(names[seg + 1]!).clone().sub(at(names[seg]!)), back));
     });
   }
-  // Model → keyboard: fingers (−y) point up the screen (−z), the back of the hand faces the
-  // viewer (+y), and the little finger is to the right for the right hand, left for the left.
-  const m = new THREE.Matrix4().makeBasis(
-    new THREE.Vector3(0, side === "right" ? 1 : -1, 0),
-    new THREE.Vector3(0, 0, 1),
-    new THREE.Vector3(side === "right" ? 1 : -1, 0, 0),
+  // Model → keyboard: fingers point up the screen (−z), the back of the hand faces the viewer
+  // (+y), and the little finger is to the right for the right hand, left for the left. Using a
+  // right-hand model for the left hand makes this a mirror image.
+  const modelAxes = new THREE.Matrix3().set(
+    forward.x, back.x, littleward.x,
+    forward.y, back.y, littleward.y,
+    forward.z, back.z, littleward.z,
   );
-  const toWorld = new THREE.Quaternion().setFromRotationMatrix(m);
+  const keyboardAxes = new THREE.Matrix3().set(0, 0, side === "right" ? 1 : -1, 0, 1, 0, -1, 0, 0);
+  const toWorld = keyboardAxes.multiply(modelAxes.clone().transpose());
   const knuckleCentre = new THREE.Vector3();
-  for (const digit of DIGITS.slice(1)) knuckleCentre.add(restPos.get(CHAIN[digit][0]!)!);
+  for (const names of chains.slice(1)) knuckleCentre.add(at(names[0]!));
   knuckleCentre.divideScalar(4);
+
+  const root = new THREE.Group();
+  root.matrixAutoUpdate = false;
+  root.add(scene);
   return {
     side,
     root,
-    material,
+    chains,
+    materials,
+    tint: materials[0]?.color.clone() ?? new THREE.Color(0xffffff),
     bones,
-    restPos,
-    restQuat,
+    rest,
     restFrame,
     toWorld,
-    fromWorld: toWorld.clone().invert(),
+    fromWorld: toWorld.clone().transpose(),
+    unit: KNUCKLE_SPAN_M / span,
     knuckleCentre,
     current: null,
     target: null,
