@@ -312,6 +312,7 @@ export function mountApp(host: HTMLElement): void {
               <select data-practice-speed></select>
             </label>
           </div>
+          <p class="hint hand-credit">3D hands: <a href="https://sketchfab.com/3d-models/hand-animation-test-b29e45290a8a4b4abad7c3405a371f67" target="_blank" rel="noopener">“Hand animation test”</a> by SantosGabriel, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a></p>
           <div class="model-setup-panel" data-model-setup>
             <h4>AI transcription setup</h4>
             <ul class="model-setup-steps" data-model-setup-steps></ul>

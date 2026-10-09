@@ -25,7 +25,7 @@ const GLIDE = 0.055;
 const KNUCKLE_SPAN_M = 0.0586;
 
 /** Which hand model to draw. */
-export type HandModelId = "webxr" | "game";
+export type HandModelId = "webxr" | "game" | "natural";
 
 type HandModel = {
   /** Model file for each hand; one file can serve both (it is mirrored for the other hand). */
@@ -65,6 +65,18 @@ const HAND_MODELS: Record<HandModelId, HandModel> = {
       ["Bone.012_05", "Bone.013_06", "Bone.014_07", "Bone.014_end_018"],
       ["Bone.015_08", "Bone.016_09", "Bone.017_010", "Bone.017_end_019"],
       ["Bone.018_011", "Bone.019_012", "Bone.020_013", "Bone.020_end_020"],
+    ],
+  },
+  // "Hand animation test" by SantosGabriel (Sketchfab, CC BY 4.0): textured skin, one hand.
+  natural: {
+    files: { left: "models/hands/natural/hand.glb", right: "models/hands/natural/hand.glb" },
+    shows: { left: "right", right: "right" },
+    chains: [
+      ["DIR_Jnt_MtCarp_Dedao_022", "DIR_Jnt_Flng01_Dedao_023", "DIR_Jnt_Flng02_Dedao_024", "DIR_Jnt_Flng03_Dedao_025"],
+      ["DIR_Jnt_Flng01_Ind_018", "DIR_Jnt_Flng02_Ind_019", "DIR_Jnt_Flng03_Ind_020", "DIR_Jnt_Flng04_Ind_021"],
+      ["DIR_Jnt_Flng01_Meio_013", "DIR_Jnt_Flng02_Meio_014", "DIR_Jnt_Flng03_Meio_015", "DIR_Jnt_Flng04_Meio_016"],
+      ["DIR_Jnt_Flng01_Anelar_08", "DIR_Jnt_Flng02_Anelar_09", "DIR_Jnt_Flng03_Anelar_010", "DIR_Jnt_Flng04_Anelar_011"],
+      ["DIR_Jnt_Flng01_Mind_03", "DIR_Jnt_Flng02_Mind_04", "DIR_Jnt_Flng03_Mind_05", "DIR_Jnt_Flng04_Mind_06"],
     ],
   },
 };
@@ -217,7 +229,7 @@ export class Hands3D {
   }
 
   /** Load the hand models and set up WebGL; null if this device cannot draw them. */
-  static async create(modelId: HandModelId = "webxr"): Promise<Hands3D | null> {
+  static async create(modelId: HandModelId = "natural"): Promise<Hands3D | null> {
     try {
       const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, premultipliedAlpha: true });
       renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
