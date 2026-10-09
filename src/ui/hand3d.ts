@@ -25,6 +25,16 @@ const KNUCKLE_REACH = 0.068;
  * the hand shows over the keys. The keys' surface itself stays exactly where it is on screen.
  */
 const VIEW_SLANT = 0.5;
+/** Where fingertips play, as a share of the keyboard's height from the top; black keys end at BLACK_END. */
+const BLACK_PLAY = 0.54;
+const WHITE_PLAY = 0.78;
+const BLACK_END = 0.62;
+/** A finger reaches at most this share of its full length (fully straight is not natural). */
+const REACH_LIMIT = 0.95;
+/** A playing finger folds back if its key is closer than this share of its reach. */
+const FOLD_LIMIT = 0.6;
+/** Least height of a playing finger's base joint above its fingertip, in metres. */
+const BASE_CLEARANCE = 0.012;
 /** Time constant of the hands' movement between poses, in seconds. */
 const GLIDE = 0.09;
 /** Time constant of a quick leap to a far part of the keyboard. */
@@ -131,6 +141,10 @@ type Rig = {
   knuckleCentre: THREE.Vector3;
   /** Where each relaxed fingertip falls across the keyboard, from the knuckles' centre (model units). */
   naturalX: number[];
+  /** Each digit's base joint relative to the knuckles' centre, in keyboard directions (model units). */
+  knuckleOffset: THREE.Vector3[];
+  /** Each digit's length from its base joint to its tip (model units). */
+  fingerLength: number[];
   current: Pose | null;
   target: Pose | null;
   visible: boolean;
@@ -144,66 +158,86 @@ function frame(forward: THREE.Vector3, up: THREE.Vector3): THREE.Quaternion {
   return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(f, u, side));
 }
 
-/**
- * Bend one finger so its tip lands on `target`: the knuckle stays put, the finger turns toward
- * the target and its joints flex in a natural curve (the end joint follows the middle one, as
- * in a real finger). Returns the joint positions, knuckle → tip.
- */
 /** The slight bend (radians) at the middle joint of a relaxed, nearly straight finger. */
 const RELAXED_BEND = 0.15;
+/** The thumb bends across toward the palm, not straight down: its bending plane leans this far (radians). */
+const THUMB_TILT = 1.0;
+/** How far the thumb's base joint can swing out toward a far key, in metres. */
+const THUMB_SWING = 0.015;
 
-export function bendFinger(base: THREE.Vector3, target: THREE.Vector3, lengths: number[]): THREE.Vector3[] {
-  const flat = new THREE.Vector3(target.x - base.x, 0, target.z - base.z);
-  const r = flat.length();
-  const heading = r > 1e-6 ? flat.divideScalar(r) : new THREE.Vector3(0, 0, -1);
-  const h = target.y - base.y;
+/**
+ * Bend one digit so its tip lands on `target`: the base joint stays put, the digit turns toward
+ * the target and its joints flex (the end joint following the middle one, as in a real finger).
+ * Fingers bend straight down; the thumb (`tilt` > 0) bends in a plane leaning across toward the
+ * fingers (`inward` = +1 if they lie toward +x). Returns the joint positions, base → tip, and the
+ * axis the joints bend about.
+ */
+export function bendDigit(
+  base: THREE.Vector3,
+  target: THREE.Vector3,
+  lengths: number[],
+  tilt = 0,
+  inward = 1,
+): { points: THREE.Vector3[]; lateral: THREE.Vector3 } {
   const total = lengths.reduce((s, l) => s + l, 0);
-  const tipAt = (a: number, b: number) => {
-    const angles = [a, a + b, a + b + 0.75 * b];
-    let x = 0;
-    let y = 0;
-    angles.forEach((phi, i) => {
-      x += lengths[i]! * Math.cos(phi);
-      y -= lengths[i]! * Math.sin(phi);
+  const toward = Math.atan2(target.x - base.x, -(target.z - base.z));
+  // Heading (in the keys' plane) and bending direction for a heading angle ψ (0 = up the keys).
+  const axes = (psi: number) => {
+    const heading = new THREE.Vector3(Math.sin(psi), 0, -Math.cos(psi));
+    const across = new THREE.Vector3(Math.cos(psi), 0, Math.sin(psi)).multiplyScalar(inward);
+    const bend = UP.clone().multiplyScalar(-Math.cos(tilt)).addScaledVector(across, Math.sin(tilt));
+    return { heading, bend };
+  };
+  const joints = (psi: number, a: number, b: number) => {
+    const { heading, bend } = axes(psi);
+    const points = [base.clone()];
+    [a, a + b, a + 1.75 * b].forEach((phi, i) => {
+      const step = heading.clone().multiplyScalar(Math.cos(phi) * lengths[i]!).addScaledVector(bend, Math.sin(phi) * lengths[i]!);
+      points.push(points[i]!.clone().add(step));
     });
-    return { x, y, angles };
+    return points;
   };
-  // Fingers lie nearly straight, with only the slight bend of a relaxed finger: the finger tilts
-  // down at the knuckle to reach the key rather than curling.
-  const cost = (a: number, b: number) => {
-    const t = tipAt(a, b);
-    return ((t.x - r) ** 2 + (t.y - h) ** 2) / (total * total) + 0.003 * (b - RELAXED_BEND) ** 2;
-  };
-  let best = { a: 0.3, b: 0.6, c: Infinity };
-  for (let i = 0; i <= 20; i++) {
-    for (let j = 0; j <= 20; j++) {
-      const a = -0.4 + (1.9 * i) / 20;
-      const b = (1.9 * j) / 20;
-      const c = cost(a, b);
-      if (c < best.c) best = { a, b, c };
+  // Reach the target; among ways to do it, prefer a relaxed, nearly straight digit.
+  const cost = (psi: number, a: number, b: number) =>
+    joints(psi, a, b)[3]!.distanceToSquared(target) / (total * total) + 0.0002 * (b - RELAXED_BEND) ** 2;
+
+  const turns = tilt === 0 ? [0] : Array.from({ length: 13 }, (_, i) => -0.9 + (1.8 * i) / 12);
+  let best = { psi: toward, a: 0.3, b: 0.6, c: Infinity };
+  for (const dpsi of turns) {
+    for (let i = 0; i <= 16; i++) {
+      for (let j = 0; j <= 16; j++) {
+        const psi = toward + dpsi;
+        const a = -0.4 + (1.9 * i) / 16;
+        const b = (1.9 * j) / 16;
+        const c = cost(psi, a, b);
+        if (c < best.c) best = { psi, a, b, c };
+      }
     }
   }
+  const moves = tilt === 0 ? ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const) : ([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const);
   for (let step = 0.05; step > 0.002; step /= 2) {
     for (let moved = true; moved; ) {
       moved = false;
-      for (const [da, db] of [[step, 0], [-step, 0], [0, step], [0, -step]] as const) {
-        const a = Math.max(-0.4, best.a + da);
-        const b = Math.min(1.9, Math.max(0, best.b + db));
-        const c = cost(a, b);
+      for (const m of moves) {
+        const [da, db, dpsi = 0] = m as readonly number[];
+        const a = Math.max(-0.4, best.a + da! * step);
+        const b = Math.min(1.9, Math.max(0, best.b + db! * step));
+        const psi = best.psi + dpsi * step;
+        const c = cost(psi, a, b);
         if (c < best.c - 1e-12) {
-          best = { a, b, c };
+          best = { psi, a, b, c };
           moved = true;
         }
       }
     }
   }
-  const { angles } = tipAt(best.a, best.b);
-  const points = [base.clone()];
-  angles.forEach((phi, i) => {
-    const step = heading.clone().multiplyScalar(Math.cos(phi) * lengths[i]!).addScaledVector(UP, -Math.sin(phi) * lengths[i]!);
-    points.push(points[i]!.clone().add(step));
-  });
-  return points;
+  const { heading, bend } = axes(best.psi);
+  return { points: joints(best.psi, best.a, best.b), lateral: new THREE.Vector3().crossVectors(heading, bend).normalize() };
+}
+
+/** Bend a finger (straight down) so its tip lands on `target`; the joint positions, base → tip. */
+export function bendFinger(base: THREE.Vector3, target: THREE.Vector3, lengths: number[]): THREE.Vector3[] {
+  return bendDigit(base, target, lengths).points;
 }
 
 /**
@@ -345,7 +379,9 @@ export class Hands3D {
     const dir = input.side === "right" ? 1 : -1;
     const byFinger = new Map(input.fingers.map((t) => [t.finger, t]));
     const at = (n: number) => byFinger.get(n as 1 | 2 | 3 | 4 | 5)!;
-    const keyZ = (t: FingerTarget) => (t.onBlack ? 0.4 : 0.66) * H;
+    // Where on a key the fingertip plays, as pianists do: black keys near their front end, white
+    // keys in the part in front of the black keys.
+    const keyZ = (t: FingerTarget) => (t.onBlack ? BLACK_PLAY : WHITE_PLAY) * H;
     // Where each fingertip falls, sideways from the knuckles' centre, in a relaxed hand.
     const natural = rig.naturalX.map((x) => x * k);
 
@@ -355,7 +391,7 @@ export class Hands3D {
     let centreX = playing.length
       ? playing.reduce((sum, n) => sum + at(n).x - natural[n - 1]!, 0) / playing.length
       : [2, 3, 4, 5].reduce((sum, n) => sum + at(n).x, 0) / 4;
-    let refZ = fingersPlaying.length ? fingersPlaying.reduce((sum, n) => sum + keyZ(at(n)), 0) / fingersPlaying.length : 0.66 * H;
+    let refZ = fingersPlaying.length ? fingersPlaying.reduce((sum, n) => sum + keyZ(at(n)), 0) / fingersPlaying.length : WHITE_PLAY * H;
     // ...but a real hand stays put while its fingers can reach from where it is: between notes it
     // does not drift back to a resting spot, and nearby notes are reached by the fingers alone.
     const key = WHITE_KEY_M * s;
@@ -368,17 +404,52 @@ export class Hands3D {
     }
     const knuckles = new THREE.Vector3(centreX, KNUCKLE_HEIGHT * s, Math.min(refZ + KNUCKLE_REACH * s, H + 0.06 * s));
     // Over the black keys, resting fingers hover above them rather than sinking into them.
-    const hover = (HOVER + (refZ < 0.6 * H ? BLACK_KEY_HEIGHT : 0)) * s;
+    const hover = (HOVER + (refZ < BLACK_END * H ? BLACK_KEY_HEIGHT : 0)) * s;
+
+    // Where the playing fingertips go: on their keys (the thumb on the front of its key).
+    const keyTip = (n: number) => {
+      const t = at(n);
+      const z = n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t);
+      return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
+    };
+    // No cheating: every playing finger must really reach its key. If one cannot from here (a
+    // black key further up, a short little finger, a key off to the side), the hand moves in —
+    // up the keys, then across — until it can.
+    for (let pass = 0; pass < 3; pass++) {
+      for (const n of playing) {
+        const tip = keyTip(n);
+        // A finger presses down onto its key: its base joint must sit above the key.
+        const lift = tip.y + BASE_CLEARANCE * s - (knuckles.y + rig.knuckleOffset[n - 1]!.y * k);
+        if (lift > 0) knuckles.y += lift;
+        const base = knuckles.clone().add(rig.knuckleOffset[n - 1]!.clone().multiplyScalar(k));
+        const length = rig.fingerLength[n - 1]! * k * REACH_LIMIT;
+        const flat = Math.sqrt(Math.max(0, length * length - (base.y - tip.y) ** 2));
+        const across = tip.x - base.x;
+        if (Math.abs(across) > 0.8 * flat) knuckles.x += across - Math.sign(across) * 0.8 * flat;
+      }
+      // Up and down the keys: each playing finger allows a band of hand positions, between
+      // reaching its key at full stretch and being so close it must fold back. Stay in every
+      // band if possible; if the bands do not meet, reaching wins.
+      let nearest = -Infinity;
+      let farthest = Infinity;
+      for (const n of playing) {
+        const tip = keyTip(n);
+        const offset = rig.knuckleOffset[n - 1]!.clone().multiplyScalar(k);
+        const length = rig.fingerLength[n - 1]! * k * REACH_LIMIT;
+        const flat = Math.sqrt(Math.max(0, length * length - (knuckles.y + offset.y - tip.y) ** 2));
+        const along = Math.sqrt(flat * flat - Math.min(flat * flat, (tip.x - (knuckles.x + offset.x)) ** 2));
+        farthest = Math.min(farthest, tip.z + along - offset.z);
+        if (n !== 1) nearest = Math.max(nearest, tip.z + FOLD_LIMIT * along - offset.z);
+      }
+      if (knuckles.z > farthest) knuckles.z = farthest;
+      else if (knuckles.z < nearest) knuckles.z = Math.min(nearest, farthest);
+    }
 
     const tips = [1, 2, 3, 4, 5].map((n) => {
-      const t = at(n);
-      // Shorter fingers reach less far up the keys; the thumb rests on the front of its key.
+      if (at(n).pressed) return keyTip(n);
+      // Shorter fingers rest less far up the keys.
       const shorter = n === 1 ? 0.018 : n === 5 ? 0.012 : n === 3 ? -0.004 : 0;
-      if (t.pressed) {
-        const z = n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t);
-        return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
-      }
-      return new THREE.Vector3(centreX + natural[n - 1]!, hover, refZ + shorter * s);
+      return new THREE.Vector3(knuckles.x + natural[n - 1]!, hover, knuckles.z - KNUCKLE_REACH * s + shorter * s);
     });
     // Fingers never cross: a resting finger stays between its neighbours (thumb → little finger
     // run left → right on the right hand, right → left on the left hand).
@@ -469,10 +540,20 @@ export class Hands3D {
       const bones = names.map((n) => rig.bones.get(n)!);
       const restPoints = bones.map((bone) => rig.rest.get(bone)!.pos);
       const lengths = [0, 1, 2].map((j) => restPoints[j]!.distanceTo(restPoints[j + 1]!) * k);
-      const points = bendFinger(toWorld(restPoints[0]!), pose.tips[i]!, lengths);
-      const heading = new THREE.Vector3(points[3]!.x - points[0]!.x, 0, points[3]!.z - points[0]!.z);
-      if (heading.lengthSq() < 1e-9) heading.set(0, 0, -1);
-      const lateral = new THREE.Vector3().crossVectors(UP, heading.normalize());
+      // The thumb's base joint swings out toward a far key (as a real thumb opens at the wrist).
+      const base = toWorld(restPoints[0]!);
+      if (i === 0) {
+        const out = new THREE.Vector3(pose.tips[0]!.x - base.x, 0, pose.tips[0]!.z - base.z);
+        const spare = out.length() - lengths.reduce((sum, l) => sum + l, 0) * REACH_LIMIT;
+        if (spare > 0) base.add(out.normalize().multiplyScalar(Math.min(spare, THUMB_SWING * this.scale)));
+      }
+      const { points, lateral } = bendDigit(
+        base,
+        pose.tips[i]!,
+        lengths,
+        i === 0 ? THUMB_TILT : 0,
+        rig.side === "right" ? 1 : -1,
+      );
       // Each bone's new model-space matrix, set relative to its parent (bones may be nested in a
       // chain, or all hang off one root).
       const posed = new Map<THREE.Object3D, THREE.Matrix4>();
@@ -606,6 +687,8 @@ function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandMo
   // in from where its middle joint is.
   const across = (p: THREE.Vector3) => p.clone().sub(knuckleCentre).applyMatrix3(toWorld).x;
   const naturalX = chains.map((names, i) => (i === 0 ? across(at(names[2]!)) * 0.85 : across(at(names[0]!)) * 1.1));
+  const knuckleOffset = chains.map((names) => at(names[0]!).clone().sub(knuckleCentre).applyMatrix3(toWorld));
+  const fingerLength = chains.map((names) => [0, 1, 2].reduce((sum, j) => sum + at(names[j]!).distanceTo(at(names[j + 1]!)), 0));
 
   const root = new THREE.Group();
   root.matrixAutoUpdate = false;
@@ -624,6 +707,8 @@ function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandMo
     unit: KNUCKLE_SPAN_M / span,
     knuckleCentre,
     naturalX,
+    knuckleOffset,
+    fingerLength,
     current: null,
     target: null,
     visible: false,
