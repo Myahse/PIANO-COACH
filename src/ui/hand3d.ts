@@ -27,6 +27,8 @@ const KNUCKLE_REACH = 0.05;
 const VIEW_SLANT = 0.5;
 /** Time constant of the hands' movement between poses, in seconds. */
 const GLIDE = 0.055;
+/** Time constant of a finger pressing or lifting off a key. */
+const PRESS = 0.03;
 
 /** Real distance from the index knuckle to the little-finger knuckle, used to size any model. */
 const KNUCKLE_SPAN_M = 0.0586;
@@ -123,6 +125,8 @@ type Rig = {
   unit: number;
   /** Mean rest position of the four knuckles, in model space. */
   knuckleCentre: THREE.Vector3;
+  /** Where each relaxed fingertip falls across the keyboard, from the knuckles' centre (model units). */
+  naturalX: number[];
   current: Pose | null;
   target: Pose | null;
   visible: boolean;
@@ -318,32 +322,62 @@ export class Hands3D {
     this.renderer.dispose();
   }
 
-  /** Fingertip targets and hand placement for one hand, in keyboard pixels. */
+  /**
+   * Fingertip targets and hand placement for one hand, in keyboard pixels.
+   *
+   * The hand moves as one: it centres itself so the playing fingers reach their keys with the
+   * least sideways bend, and the other fingers stay relaxed where they naturally fall — in line
+   * with their own knuckles, slightly curled above the keys — instead of being sent to keys.
+   */
   private targetPose(input: Hand3DInput): Pose {
     const s = this.scale;
     const H = this.height;
+    const rig = this.rigs[input.side];
+    const k = s * rig.unit;
+    const dir = input.side === "right" ? 1 : -1;
     const byFinger = new Map(input.fingers.map((t) => [t.finger, t]));
+    const at = (n: number) => byFinger.get(n as 1 | 2 | 3 | 4 | 5)!;
     const keyZ = (t: FingerTarget) => (t.onBlack ? 0.4 : 0.66) * H;
-    const pressed = input.fingers.filter((t) => t.pressed && t.finger !== 1);
-    // The hand sits where its playing fingers are (or over the white keys when resting).
-    const refZ = pressed.length ? pressed.reduce((sum, t) => sum + keyZ(t), 0) / pressed.length : 0.66 * H;
-    const fingersX = [2, 3, 4, 5].map((n) => byFinger.get(n as 1 | 2 | 3 | 4 | 5)!.x);
-    const knuckles = new THREE.Vector3(
-      fingersX.reduce((sum, x) => sum + x, 0) / 4,
-      KNUCKLE_HEIGHT * s,
-      Math.min(refZ + KNUCKLE_REACH * s, H + 0.06 * s),
-    );
+    // Where each fingertip falls, sideways from the knuckles' centre, in a relaxed hand.
+    const natural = rig.naturalX.map((x) => x * k);
+
+    const playing = [1, 2, 3, 4, 5].filter((n) => at(n).pressed);
+    const fingersPlaying = playing.filter((n) => n !== 1);
+    // Centre the hand on the playing fingers (or where the planner rests it).
+    const centreX = playing.length
+      ? playing.reduce((sum, n) => sum + at(n).x - natural[n - 1]!, 0) / playing.length
+      : [2, 3, 4, 5].reduce((sum, n) => sum + at(n).x, 0) / 4;
+    const refZ = fingersPlaying.length ? fingersPlaying.reduce((sum, n) => sum + keyZ(at(n)), 0) / fingersPlaying.length : 0.66 * H;
+    const knuckles = new THREE.Vector3(centreX, KNUCKLE_HEIGHT * s, Math.min(refZ + KNUCKLE_REACH * s, H + 0.06 * s));
+    // Over the black keys, resting fingers hover above them rather than sinking into them.
+    const hover = (HOVER + (refZ < 0.6 * H ? BLACK_KEY_HEIGHT : 0)) * s;
+
     const tips = [1, 2, 3, 4, 5].map((n) => {
-      const t = byFinger.get(n as 1 | 2 | 3 | 4 | 5)!;
+      const t = at(n);
       // Shorter fingers reach less far up the keys; the thumb rests on the front of its key.
       const shorter = n === 1 ? 0.018 : n === 5 ? 0.012 : n === 3 ? -0.004 : 0;
       if (t.pressed) {
         const z = n === 1 && !t.onBlack ? Math.max(keyZ(t), refZ) + 0.012 * s : keyZ(t);
         return new THREE.Vector3(t.x, (t.onBlack ? BLACK_KEY_HEIGHT : 0) * s - KEY_DIP * s, z);
       }
-      return new THREE.Vector3(t.x, HOVER * s + (t.onBlack ? BLACK_KEY_HEIGHT * s : 0), refZ + shorter * s);
+      return new THREE.Vector3(centreX + natural[n - 1]!, hover, refZ + shorter * s);
     });
-    const pressedFingers = [1, 2, 3, 4, 5].map((n) => byFinger.get(n as 1 | 2 | 3 | 4 | 5)!.pressed);
+    // Fingers never cross: a resting finger stays between its neighbours (thumb → little finger
+    // run left → right on the right hand, right → left on the left hand).
+    const gap = 0.55 * s * WHITE_KEY_M;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 1; i < 5; i++) {
+        const prev = tips[i - 1]!;
+        const tip = tips[i]!;
+        if (!at(i + 1).pressed && dir * (tip.x - prev.x) < gap) tip.x = prev.x + dir * gap;
+      }
+      for (let i = 3; i >= 0; i--) {
+        const next = tips[i + 1]!;
+        const tip = tips[i]!;
+        if (!at(i + 1).pressed && dir * (next.x - tip.x) < gap) tip.x = next.x - dir * gap;
+      }
+    }
+    const pressedFingers = [1, 2, 3, 4, 5].map((n) => at(n).pressed);
     return { knuckles, tips, pressed: pressedFingers, activity: input.active ? 1 : 0 };
   }
 
@@ -366,8 +400,20 @@ export class Hands3D {
       } else {
         const c = rig.current;
         const t = rig.target;
+        // Fingers move with the hand: blend each fingertip relative to the knuckles, so a hand
+        // shift carries all the fingers along instead of each one sweeping across on its own.
+        // Pressing and lifting (height) is quicker than travelling.
+        const press = 1 - Math.exp(-dt / PRESS);
+        const before = c.knuckles.clone();
         c.knuckles.lerp(t.knuckles, k);
-        c.tips.forEach((tip, i) => tip.lerp(t.tips[i]!, k));
+        c.tips.forEach((tip, i) => {
+          const rel = tip.clone().sub(before);
+          const goal = t.tips[i]!.clone().sub(t.knuckles);
+          const y = rel.y + (goal.y - rel.y) * press;
+          rel.lerp(goal, k);
+          rel.y = y;
+          tip.copy(c.knuckles).add(rel);
+        });
         c.activity += (t.activity - c.activity) * k;
         c.pressed = t.pressed;
         const gap = c.knuckles.distanceTo(t.knuckles) + c.tips.reduce((sum, tip, i) => sum + tip.distanceTo(t.tips[i]!), 0);
@@ -536,6 +582,10 @@ function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandMo
   const knuckleCentre = new THREE.Vector3();
   for (const names of chains.slice(1)) knuckleCentre.add(at(names[0]!));
   knuckleCentre.divideScalar(4);
+  // Relaxed fingers fan out a little beyond their knuckles; the thumb sits about a key's width
+  // in from where its middle joint is.
+  const across = (p: THREE.Vector3) => p.clone().sub(knuckleCentre).applyMatrix3(toWorld).x;
+  const naturalX = chains.map((names, i) => (i === 0 ? across(at(names[2]!)) * 0.85 : across(at(names[0]!)) * 1.1));
 
   const root = new THREE.Group();
   root.matrixAutoUpdate = false;
@@ -553,6 +603,7 @@ function buildRig(side: HandSide, gltf: { scene: THREE.Object3D }, model: HandMo
     fromWorld: toWorld.clone().transpose(),
     unit: KNUCKLE_SPAN_M / span,
     knuckleCentre,
+    naturalX,
     current: null,
     target: null,
     visible: false,
